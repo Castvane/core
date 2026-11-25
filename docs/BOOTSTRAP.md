@@ -46,6 +46,6 @@ Test discovery/login/refresh first; add process creation, playback, configuratio
 - [x] Pinned CI action and locked lint/test/release build commands on both target architectures.
 - [x] Supported platform, FFmpeg distribution and reference UI decisions recorded.
 - [x] Local format, Clippy, test, release build and HTTP/SIGTERM smoke verification on Linux amd64 (2 unit/contract tests; real HTTP smoke test).
-- [ ] Remote CI verification on amd64 and arm64.
+- [x] Remote CI verification on amd64 and arm64: [run 45606969113](https://github.com/KingIronMan2011/restreamer-core/actions/runs/45606969113), both jobs passed for commit `47e4cae7`.
 
-CI runner labels are documented in [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). No actual v3 management endpoints are implemented yet; Phase 1 is the next work item after bootstrap verification.
+CI runner labels are documented in [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Phase 0 is complete. No actual v3 management endpoints are implemented yet; Phase 1 is next.

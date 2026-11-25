@@ -30,11 +30,11 @@ Start with a single binary and library. Split into Cargo workspace crates as the
 
 ## Phases and exit gates
 
-### 0 — Bootstrap (current)
+### 0 — Bootstrap (complete)
 
 Create Rust package, liveness endpoint, contract test and CI. Use the MIT license. See [bootstrap decisions and exit checklist](docs/BOOTSTRAP.md) for supported platforms, FFmpeg distribution, pinned reference UI versions, committed lockfile, toolchain, and verification status. CI uses pinned actions and locked build commands.
 
-### 1 — Contract and foundation
+### 1 — Contract and foundation (next)
 
 Build the versioned v3 adapter, configuration validation, app discovery, error mappings and authentication/refresh behavior. Add persistent, transactional configuration with migration/versioning, structured logs and authorization checks. Add differential API tests and browser UI boot/login tests against the reference. Include default configuration and environment compatibility inventory.
 

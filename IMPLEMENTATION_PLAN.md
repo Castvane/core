@@ -1,0 +1,67 @@
+# Independent Rust core — implementation plan
+
+## Goals and non-goals
+
+- Preserve observable compatibility with existing Restreamer UIs, using the Go `vod` branch at `452e9429` as the current behavioral reference and older supported UI releases as regression targets.
+- Retain the public `/api/v3` contract, including unversioned legacy routes (`/api`, `/api/login`, `/api/login/refresh`, `/ping`), GraphQL where clients use `/api/graph`, media mounts and optional Swagger access. Internal Rust architecture and storage formats may differ.
+- Treat public API versions separately from application releases. Reserve `/api/v4` for future breaking changes; keep v3 adapters operational. Do not require an old UI to change its base URL, tokens, or request format.
+- Independently implement internals from documented behavior; do not translate Go files. Review licensing before importing any reference artifacts. Select the new project's license explicitly before release.
+- Do not attempt to replace FFmpeg codecs or protocols with bespoke implementations. Use supported FFmpeg and FFprobe executables and proven media-protocol libraries/services after license and maintenance review.
+
+## Compatibility discipline
+
+Phase 1 must inventory routes from `vod` and supported UI releases, recording method, path, query parameters, request/response field names, null versus omitted versus empty values, defaults, status codes, error envelopes, headers, auth requirements, feature flags, and side effects. Include GraphQL operations and media URL formats. Create independently authored sanitized fixtures from observed behavior, then compare Rust responses against a pinned reference instance in integration tests. Test older and current UIs in a browser without modification. Where versions disagree, preserve old behavior for old clients without breaking current clients; document any irreconcilable differences before release.
+
+| Surface | Compatibility priority |
+| --- | --- |
+| `/ping`, `/api`, `/api/login`, `/api/login/refresh` | UI discovery, liveness and authentication |
+| `/api/v3/process`, `/skills`, `/metadata`, `/report/process`, `/widget/process/{id}` (under v3) | Process CRUD, commands, probe, progress, reports and metadata |
+| `/api/v3/config`, `/fs`, `/rtmp`, `/srt`, `/session`, `/log`, `/metrics` (under v3) | Configuration, storage, ingest, playback and monitoring |
+| `/api/v3/iam`, `/alias`, `/zone`, `/events` (under v3) | Access control, media routing and events |
+| `/api/v3/cluster/*` | Cluster nodes, processes, deployment, state, routing and management |
+| `/api/graph`, `/api/swagger/*`, `/metrics`, media mounts | GraphQL, docs, metrics and media delivery |
+| Separate cluster service `/v1/*` | Evaluate explicitly; preserve wire compatibility if mixed Go/Rust clusters are required; otherwise internal protocol can differ |
+
+Never advertise full v3 compatibility until the route inventory, reference tests, and supported UI workflows pass. Unsupported operations must fail clearly rather than return fake success. Old UI compatibility does not imply joining existing Go Raft clusters; mixed-node compatibility is a distinct decision requiring consensus/storage/protocol interoperability work.
+
+## Architecture
+
+Start with a single binary and library. Split into Cargo workspace crates as the boundaries mature: API compatibility adapters; domain model; FFmpeg supervisor; storage/media; authentication; resource monitoring; cluster control plane; workers. Keep domain types separate from legacy DTOs, with explicit conversions at API boundaries. Use Tokio and Axum, Serde, tracing, OpenAPI tooling, SQLite for single-node state (evaluate SQLx), and a reviewed Raft library for cluster consensus if self-contained clustering is selected. Evaluate Tonic for internal RPC; it must not replace public v3 endpoints. Use bounded queues, cancellation, deadlines, and explicit lifecycle state machines.
+
+## Phases and exit gates
+
+### 0 — Bootstrap (current)
+
+Create Rust package, liveness endpoint, contract test and CI. Decide license, supported OS/architecture, FFmpeg distribution model, and reference UI versions. Commit the Cargo lockfile once dependencies can be resolved. Pin CI actions and enforce locked builds before releases.
+
+### 1 — Contract and foundation
+
+Build the versioned v3 adapter, configuration validation, app discovery, error mappings and authentication/refresh behavior. Add persistent, transactional configuration with migration/versioning, structured logs and authorization checks. Add differential API tests and browser UI boot/login tests against the reference. Include default configuration and environment compatibility inventory.
+
+### 2 — Single-node process engine
+
+Implement process CRUD, desired versus observed state, start/stop/restart, probing, per-process logs, progress and reports, references/placeholders, scheduled starts, validation, retry/backoff, stall detection and bounded history. Use argument vectors rather than shell interpolation. Supervise process groups, enforce cancellation/timeouts and prevent child leaks. Store public metadata separately from secrets. Test concurrent commands, crashes, restart reconciliation, absent FFmpeg, and long-running streams. Exit: old UI can create and manage a real stream.
+
+### 3 — Media and storage
+
+Support RTMP/SRT input/output, HTTP/HLS/DASH and FLV where required by reference behavior, disk/memory/S3 storage, range requests, correct HEAD semantics, aliases and playlist rewriting. Bound memory, disk and bandwidth usage. Prefer shared immutable reference-counted media buffers to full copies. Verify stream interoperability, slow clients, cleanup, storage failures and access controls. Add playout and viewer/session compatibility.
+
+### 4 — Operations and IAM
+
+Implement legacy IAM policies, users, zones, metrics, events, protocol configuration, TLS/certificates and GPU capabilities. Introduce least-privilege service identity, validated destinations, storage boundaries, secrets handling and process isolation. Verify resource limits under cgroups, and CPU/GPU execution on supported deployment images. Match reference API behavior while documenting deliberate security fixes.
+
+### 5 — Distributed control plane
+
+Provide standalone and clustered modes, with stable node identity, enrollment/authentication, heartbeat and resource inventory. Replicate durable desired state with a reviewed consensus library; distinguish quorum decisions from ephemeral telemetry. Implement reconciliation, reservations, affinity, zones, relocation, rebalancing, failover and distributed locks/leases with fencing. Test partitions, leader elections, duplicate commands, node removal, recovery, snapshots and rolling upgrades. Expose v3 cluster APIs; decide mixed Go/Rust cluster support separately. Prevent conflicting process ownership when quorum is unavailable.
+
+### 6 — Release and maintenance
+
+Finish endpoint/feature coverage, GraphQL operations and legacy UI tests. Add documented migrations and safe rollback for applicable existing configurations, native binaries and Docker images for supported architectures, health/readiness, observability, dependency/license audit, release SBOM, soak/load tests and disaster recovery drills. Document unsupported legacy behaviors, if any. Require all compatibility and operational gates to pass before declaring a production release.
+
+## Quality gates
+
+Run formatting, Clippy with warnings denied, unit/integration tests, API contract tests, UI browser tests, dependency audit and license checks. Use fixture streams and isolated test environments. Test persistence after crashes, graceful shutdown, resource exhaustion, slow viewers, invalid requests, auth scope and denial cases, and multi-node failure scenarios. Performance conclusions require reproducible side-by-side benchmarks with equal FFmpeg settings and hardware.
+
+## Estimate
+
+Planning ranges for cumulative active AI-agent implementation time, not release promises: single-node feature-complete 40–90 hours; distributed beta 150–250 hours; broad `vod` parity including legacy API 250–450 hours; production validation 450–750+ hours. Hardware availability, required old UI versions and mixed-cluster compatibility can expand scope materially.

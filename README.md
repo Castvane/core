@@ -18,4 +18,4 @@ Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap and compat
 
 ## Licensing
 
-The license for newly authored Rust code remains to be selected by the owner before distribution. No permission to redistribute the new code is implied by this draft. The reference Go project and its historical commits remain licensed under their original terms. Do not copy upstream implementation, documentation, or generated schemas into this tree without an explicit license review. Dependencies and FFmpeg retain their respective licenses.
+The independently authored Rust implementation is licensed under the [MIT License](LICENSE). The reference Go project and its historical commits remain licensed under their original terms (Apache 2.0). Do not copy upstream implementation, documentation, or generated schemas into this tree without an explicit license review. Dependencies and FFmpeg retain their respective licenses.

@@ -5,7 +5,7 @@
 - Preserve observable compatibility with existing Restreamer UIs, using the Go `vod` branch at `452e9429` as the current behavioral reference and older supported UI releases as regression targets.
 - Retain the public `/api/v3` contract, including unversioned legacy routes (`/api`, `/api/login`, `/api/login/refresh`, `/ping`), GraphQL where clients use `/api/graph`, media mounts and optional Swagger access. Internal Rust architecture and storage formats may differ.
 - Treat public API versions separately from application releases. Reserve `/api/v4` for future breaking changes; keep v3 adapters operational. Do not require an old UI to change its base URL, tokens, or request format.
-- Independently implement internals from documented behavior; do not translate Go files. Review licensing before importing any reference artifacts. Select the new project's license explicitly before release.
+- Independently implement internals from documented behavior; do not translate Go files. Review licensing before importing any reference artifacts. License independently authored Rust code under MIT; historical Go code retains its Apache 2.0 license.
 - Do not attempt to replace FFmpeg codecs or protocols with bespoke implementations. Use supported FFmpeg and FFprobe executables and proven media-protocol libraries/services after license and maintenance review.
 
 ## Compatibility discipline
@@ -32,7 +32,7 @@ Start with a single binary and library. Split into Cargo workspace crates as the
 
 ### 0 — Bootstrap (current)
 
-Create Rust package, liveness endpoint, contract test and CI. Decide license, supported OS/architecture, FFmpeg distribution model, and reference UI versions. Commit the Cargo lockfile once dependencies can be resolved. Pin CI actions and enforce locked builds before releases.
+Create Rust package, liveness endpoint, contract test and CI. Use the MIT license. Decide supported OS/architecture, FFmpeg distribution model, and reference UI versions. Commit the Cargo lockfile once dependencies can be resolved. Pin CI actions and enforce locked builds before releases.
 
 ### 1 — Contract and foundation
 

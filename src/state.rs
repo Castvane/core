@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 use crate::{
     auth::{Authentication, hash_password, verify_password},
     config::{self, Environment, SCHEMA, Settings},
+    engine::{Engine, Options},
     listener::ReloadableListener,
     persistence::{Record, Store},
 };
@@ -21,6 +22,7 @@ pub type StartupError = Box<dyn std::error::Error + Send + Sync>;
 pub struct App {
     pub(crate) store: Store,
     pub(crate) auth: Authentication,
+    pub(crate) processes: Arc<Engine>,
     pub(crate) environment: Environment,
     pub(crate) started_at: OffsetDateTime,
     listening: RwLock<SocketAddr>,
@@ -136,9 +138,15 @@ impl App {
         tx.commit().await?;
         let auth = Authentication::new(key).await?;
         environment.clear_secrets();
+        let processes = Engine::open(
+            store.0.clone(),
+            Options::from_document(&effective, &environment.engine)?,
+        )
+        .await?;
         Ok(Self {
             store,
             auth,
+            processes,
             environment,
             started_at: now,
             listening: RwLock::new(listening),
@@ -197,6 +205,7 @@ impl App {
     }
 
     pub async fn close(&self) {
+        self.processes.close().await;
         self.store.close().await;
     }
 }

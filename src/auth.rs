@@ -33,6 +33,8 @@ pub enum Permission {
     ReadConfig,
     WriteConfig,
     ReadDiscovery,
+    ReadProcess,
+    WriteProcess,
 }
 
 impl Identity {

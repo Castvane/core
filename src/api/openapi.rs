@@ -16,7 +16,7 @@ pub async fn index() -> Html<&'static str> {
 }
 
 pub async fn document() -> Json<Value> {
-    Json(json!({
+    let mut spec = json!({
         "openapi": "3.1.0",
         "info": {"title":"Restreamer Core", "version":env!("CARGO_PKG_VERSION")},
         "paths": {
@@ -34,7 +34,38 @@ pub async fn document() -> Json<Value> {
             "securitySchemes":{"bearer":{"type":"http","scheme":"bearer","bearerFormat":"JWT"}},
             "schemas":{"Error":{"type":"object","required":["code","message","details"],"properties":{"code":{"type":"integer"},"message":{"type":"string"},"details":{"type":"array","items":{"type":"string"}}}}}
         }
-    }))
+    });
+    for (path, methods) in [
+        ("/skills", &["get"][..]),
+        ("/skills/reload", &["get"][..]),
+        ("/process", &["get", "post"][..]),
+        ("/process/{id}", &["get", "put", "delete"][..]),
+        ("/process/{id}/config", &["get"][..]),
+        ("/process/{id}/state", &["get"][..]),
+        ("/process/{id}/report", &["get", "put"][..]),
+        ("/process/{id}/command", &["put"][..]),
+        ("/process/probe", &["post"][..]),
+        ("/process/validate", &["post"][..]),
+        ("/process/{id}/probe", &["get"][..]),
+        ("/process/{id}/metadata", &["get"][..]),
+        ("/process/{id}/metadata/{key}", &["get", "put"][..]),
+        ("/metadata", &["get"][..]),
+        ("/metadata/{key}", &["get", "put"][..]),
+        ("/report/process", &["get"][..]),
+    ] {
+        let parameters: Vec<_> = ["id", "key"]
+            .into_iter()
+            .filter(|name| path.contains(&format!("{{{name}}}")))
+            .map(|name| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}}))
+            .collect();
+        for method in methods {
+            spec["paths"][format!("/api/v3{path}")][*method] = json!({
+                "security":[{"bearer":[]}],"parameters":parameters,
+                "responses":{"200":{"description":"Legacy v3 response"},"400":error(),"403":error(),"404":error(),"409":error(),"503":error()}
+            });
+        }
+    }
+    Json(spec)
 }
 
 fn error() -> Value {

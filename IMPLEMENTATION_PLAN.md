@@ -40,7 +40,7 @@ Build the versioned v3 adapter, configuration validation, app discovery, error m
 
 ### 2 — Single-node process engine
 
-Implement process CRUD, desired versus observed state, start/stop/restart, probing, per-process logs, progress and reports, references/placeholders, scheduled starts, validation, retry/backoff, stall detection and bounded history. Use argument vectors rather than shell interpolation. Supervise process groups, enforce cancellation/timeouts and prevent child leaks. Store public metadata separately from secrets. Test concurrent commands, crashes, restart reconciliation, absent FFmpeg, and long-running streams. Exit: old UI can create and manage a real stream.
+Implement process CRUD, desired versus observed state, start/stop/restart, probing, per-process logs, progress and reports, references/placeholders, scheduled starts, validation, retry/backoff, stall detection and bounded history. Use argument vectors rather than shell interpolation. Supervise process groups, enforce cancellation/timeouts and prevent child leaks. Store public metadata separately from secrets. Test concurrent commands, crashes, restart reconciliation, absent FFmpeg, and long-running streams. The process API can create and manage a real local stream. Track manual UI acceptance, version gates and later media dependencies separately. See [Phase 2 status](docs/PHASE_2_STATUS.md) for compatibility and verification.
 
 ### 3 — Media and storage
 

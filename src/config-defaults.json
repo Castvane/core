@@ -29,7 +29,7 @@
   },
   "rtmp":{"enable":false,"enable_tls":false,"address":":1935","address_tls":":1936","app":"/","token":"","httpflv":{"enable":false,"mount":"/rtmp"}},
   "srt":{"enable":false,"address":":6000","passphrase":"","token":"","log":{"enable":false,"topics":[]}},
-  "ffmpeg":{"binary":"ffmpeg","max_processes":0,"disable_throttling":false,"access":{"input":{"allow":[],"block":[]},"output":{"allow":[],"block":[]}},"log":{"max_lines":50,"max_history":3,"max_minimal_history":0}},
+  "ffmpeg":{"binary":"ffmpeg","probe_binary":"","probe_timeout_seconds":8,"stop_timeout_seconds":3,"max_retries":10,"max_processes":0,"disable_throttling":false,"access":{"input":{"allow":[],"block":[]},"output":{"allow":[],"block":[]}},"log":{"max_lines":50,"max_history":3,"max_minimal_history":0}},
   "playout":{"enable":false,"min_port":0,"max_port":0},
   "debug":{"profiling":false,"force_gc":0,"memory_limit_mbytes":0,"auto_max_procs":false,"agent_address":""},
   "metrics":{"enable":false,"enable_prometheus":false,"range_sec":300,"interval_sec":2},

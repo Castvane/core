@@ -37,14 +37,14 @@ status=$(curl --silent --show-error --max-time 5 --output "$work_dir/body" --wri
 status=$(curl --silent --show-error --max-time 5 --output "$work_dir/body" --write-out '%{http_code}' "http://$address/api/v3/config")
 [[ "$status" == 200 && $(<"$work_dir/body") == *'"version":3'* ]]
 status=$(curl --silent --show-error --max-time 5 --output "$work_dir/body" --write-out '%{http_code}' "http://$address/api/v3/process")
-[[ "$status" == 404 ]]
+[[ "$status" == 200 && $(<"$work_dir/body") == "[]" ]]
 
 kill -TERM "$pid"
 for _ in {1..100}; do
     if ! kill -0 "$pid" 2>/dev/null; then
         wait "$pid"
         pid=
-        echo 'Smoke test passed: ping, discovery, config, unfinished API, graceful SIGTERM.'
+        echo 'Smoke test passed: ping, discovery, config, process list, graceful SIGTERM.'
         exit 0
     fi
     sleep 0.1

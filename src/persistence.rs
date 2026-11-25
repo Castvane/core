@@ -6,7 +6,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
 
-pub struct Store(SqlitePool);
+pub struct Store(pub(crate) SqlitePool);
 
 #[derive(FromRow)]
 pub struct Record {

@@ -80,6 +80,7 @@ struct AuthTenant {
 }
 
 pub struct Environment {
+    pub(crate) engine: crate::engine::Overrides,
     pub db: PathBuf,
     pub password: Option<Zeroizing<String>>,
     pub signing_key: Option<Zeroizing<String>>,
@@ -91,7 +92,24 @@ pub struct Environment {
 
 impl Environment {
     pub fn read() -> Result<Self, &'static str> {
-        Self::from_lookup(|key| std::env::var(key).ok())
+        let mut environment = Self::from_lookup(|key| std::env::var(key).ok())?;
+        environment.engine.values = std::env::vars_os()
+            .filter_map(|(key, value)| {
+                let key = key.into_string().ok()?;
+                if key.starts_with("CORE_PROCESS_VALUE_") || key.starts_with("CORE_PROCESS_SECRET_")
+                {
+                    return value.into_string().ok().map(|value| (key, value));
+                }
+                None
+            })
+            .collect();
+        Ok(environment)
+    }
+
+    /// Select the standalone Core executable as the Linux media child launcher.
+    pub fn with_media_launcher(mut self, executable: PathBuf) -> Self {
+        self.engine.launcher = Some(executable);
+        self
     }
 
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, &'static str> {
@@ -128,6 +146,8 @@ impl Environment {
                 &["CORE_API_AUTH_USERNAME", "RS_USERNAME"][..],
             ),
             ("ffmpeg.binary", &["CORE_FFMPEG_BINARY"][..]),
+            ("ffmpeg.probe_binary", &["CORE_FFPROBE_BINARY"][..]),
+            ("storage.disk.dir", &["CORE_STORAGE_DISK_DIR"][..]),
             ("router.ui_path", &["CORE_ROUTER_UI_PATH"][..]),
         ] {
             if let Some(value) = keys.iter().find_map(|key| get(key)) {
@@ -189,7 +209,70 @@ impl Environment {
                 ),
             );
         }
+        for (path, keys) in [
+            (
+                "ffmpeg.probe_timeout_seconds",
+                &["CORE_FFMPEG_PROBE_TIMEOUT_SECONDS"][..],
+            ),
+            (
+                "ffmpeg.stop_timeout_seconds",
+                &["CORE_FFMPEG_STOP_TIMEOUT_SECONDS"][..],
+            ),
+            ("ffmpeg.max_retries", &["CORE_FFMPEG_MAX_RETRIES"][..]),
+            (
+                "ffmpeg.max_processes",
+                &["CORE_FFMPEG_MAX_PROCESSES", "CORE_FFMPEG_MAXPROCESSES"][..],
+            ),
+            (
+                "ffmpeg.log.max_lines",
+                &["CORE_FFMPEG_LOG_MAX_LINES", "CORE_FFMPEG_LOG_MAXLINES"][..],
+            ),
+            (
+                "ffmpeg.log.max_history",
+                &["CORE_FFMPEG_LOG_MAX_HISTORY", "CORE_FFMPEG_LOG_MAXHISTORY"][..],
+            ),
+        ] {
+            if let Some(value) = keys.iter().find_map(|key| get(key)) {
+                overrides.insert(
+                    path,
+                    json!(
+                        value
+                            .parse::<u64>()
+                            .map_err(|_| "invalid FFmpeg environment setting")?
+                    ),
+                );
+            }
+        }
+        for (path, key) in [
+            (
+                "ffmpeg.access.input.allow",
+                "CORE_FFMPEG_ACCESS_INPUT_ALLOW",
+            ),
+            (
+                "ffmpeg.access.input.block",
+                "CORE_FFMPEG_ACCESS_INPUT_BLOCK",
+            ),
+            (
+                "ffmpeg.access.output.allow",
+                "CORE_FFMPEG_ACCESS_OUTPUT_ALLOW",
+            ),
+            (
+                "ffmpeg.access.output.block",
+                "CORE_FFMPEG_ACCESS_OUTPUT_BLOCK",
+            ),
+        ] {
+            if let Some(value) = get(key) {
+                overrides.insert(path, json!(value.split_whitespace().collect::<Vec<_>>()));
+            }
+        }
         Ok(Self {
+            engine: crate::engine::Overrides {
+                launcher: None,
+                cgroup: get("CORE_PROCESS_CGROUP_ROOT")
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from),
+                values: BTreeMap::new(),
+            },
             password_override: password.is_some(),
             signing_key_override: signing_key.is_some(),
             db,

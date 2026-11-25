@@ -67,9 +67,9 @@ All five clients call `GET /api` and use presence of an instance ID to tell full
 
 The first admin/dashboard calls beyond discovery and auth are configuration, skills and `GET /api/v3/process` with metadata filtering. Further dashboard pages use global `restreamer-ui` metadata, session collectors, files, reports, logs and process state. The media player can call `GET /api/v3/widget/process/{id}` independently of the management page. The Rust version fails each UI’s production Core version range, and no FFmpeg capabilities are advertised. Full dashboard initialization and settings workflows require later phases.
 
-## Reference routes deferred beyond Phase 1
+## Reference route inventory after Phase 1
 
-Every route below currently returns a Rust 404. Paths in this table are relative to `/api/v3` unless the row specifies another base.
+The Phase 2 rows are implemented. See [Phase 2 status](PHASE_2_STATUS.md) for current schemas, behavior and limits. Phase 3 and later rows remain deferred. Paths in this table are relative to `/api/v3` unless the row specifies another base.
 
 | Phase | Method and path groups | Reference contract and conditions |
 | --- | --- | --- |

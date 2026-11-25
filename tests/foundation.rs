@@ -192,13 +192,13 @@ async fn discovery_local_login_refresh_and_policy() {
         .await;
     assert_eq!(status, 200);
     assert_eq!(docs["openapi"], "3.1.0");
-    assert!(docs["paths"].get("/api/v3/process").is_none());
+    assert!(docs["paths"].get("/api/v3/process").is_some());
     assert_eq!(
         server
             .request("GET", "/api/v3/process", None, Some(access))
             .await
             .0,
-        404
+        200
     );
     assert_eq!(
         server
@@ -379,7 +379,7 @@ async fn startup_migrates_existing_data_and_database_contains_no_plain_password(
             .fetch_one(&pool)
             .await
             .unwrap(),
-        1
+        2
     );
     pool.close().await;
     let migrated = Instance::open(&dir, &[]).await;

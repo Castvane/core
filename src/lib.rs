@@ -3,6 +3,7 @@
 mod api;
 mod auth;
 pub mod config;
+mod engine;
 mod listener;
 mod persistence;
 mod state;

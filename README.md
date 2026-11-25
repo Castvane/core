@@ -14,7 +14,9 @@ cargo test --locked
 
 The server binds to loopback by default. It exposes liveness, legacy discovery, local JWT login and refresh, persistent v3 configuration, and OpenAPI documentation. Set `CORE_API_AUTH_PASSWORD` to a strong password to provision the administrator and enable login. `CORE_API_AUTH_USERNAME` defaults to `admin` when provisioning. `CORE_DATABASE_PATH` selects the SQLite file and `CORE_BIND_ADDR` overrides the listener.
 
-See [Phase 1 status](docs/PHASE_1_STATUS.md) for configuration, verification and manual UI testing. The [compatibility matrix](docs/API_COMPATIBILITY.md) describes the wire contract and UI initialization limits.
+Install FFmpeg and FFprobe to run single-node processes. The v3 process API supports lifecycle commands, probing, progress, reports, schedules and restart reconciliation. Use `CORE_FFMPEG_BINARY` or `CORE_FFPROBE_BINARY` to select custom executable paths. See [Phase 2 status](docs/PHASE_2_STATUS.md) for the contracts and deployment settings.
+
+See [Phase 1 status](docs/PHASE_1_STATUS.md) for authentication, configuration and manual UI testing. The [compatibility matrix](docs/API_COMPATIBILITY.md) describes the wire contract and UI initialization limits.
 
 Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap and compatibility contract. The Go reference remains on `vod` at commit `452e9429`.
 

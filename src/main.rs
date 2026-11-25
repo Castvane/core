@@ -1,14 +1,51 @@
 #![forbid(unsafe_code)]
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{ffi::OsString, net::SocketAddr, os::unix::process::CommandExt, sync::Arc};
 
 use axum::serve::{Listener, ListenerExt};
 use restreamer_core::{App, StartupError, config::Environment};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<(), StartupError> {
-    let mut app = App::open(Environment::read()?).await?;
+fn main() -> Result<(), StartupError> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() == Some(std::ffi::OsStr::new("__media_child")) {
+        if media_child(args).is_err() {
+            eprintln!("configured media executable could not start");
+            std::process::exit(126);
+        }
+        return Ok(());
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(serve())
+}
+
+fn media_child(mut args: impl Iterator<Item = OsString>) -> Result<(), StartupError> {
+    use nix::{
+        sys::{prctl, signal::Signal},
+        unistd::getppid,
+    };
+
+    let parent = args
+        .next()
+        .and_then(|arg| arg.to_str()?.parse::<i32>().ok())
+        .ok_or("missing media supervisor PID")?;
+    let executable = args.next().ok_or("missing media executable")?;
+    prctl::set_pdeathsig(Signal::SIGKILL)?;
+    if getppid().as_raw() != parent {
+        return Err("media supervisor exited before launch".into());
+    }
+    prctl::set_no_new_privs()?;
+    Err(std::process::Command::new(executable)
+        .args(args)
+        .exec()
+        .into())
+}
+
+async fn serve() -> Result<(), StartupError> {
+    let environment = Environment::read()?.with_media_launcher(std::env::current_exe()?);
+    let mut app = App::open(environment).await?;
     let configured_level = app.log_level().await?;
     let explicit_filter = EnvFilter::try_from_default_env().ok();
     let reloadable = explicit_filter.is_none();

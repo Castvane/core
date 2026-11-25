@@ -1,6 +1,8 @@
 mod dto;
 mod error;
 mod openapi;
+mod process;
+mod process_dto;
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -36,6 +38,7 @@ pub fn router(app: Arc<App>) -> Router {
     let management = Router::new()
         .route("/config", get(get_config).put(set_config))
         .route("/config/reload", get(reload_config))
+        .merge(process::routes())
         .route_layer(middleware::from_fn_with_state(app.clone(), authorize));
     let documentation = Router::new()
         .route("/api/swagger", get(openapi::redirect))
@@ -174,10 +177,21 @@ async fn authorize(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let reload = request.uri().path().ends_with("/reload");
-    let write = request.method() == Method::PUT || reload;
+    let path = request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map_or(request.uri().path(), |uri| uri.0.path());
+    let process_route = path.starts_with("/api/v3/process")
+        || path.starts_with("/api/v3/metadata")
+        || path.starts_with("/api/v3/report")
+        || path.starts_with("/api/v3/skills");
+    let reload = path.ends_with("/config/reload");
+    let write = matches!(
+        *request.method(),
+        Method::PUT | Method::POST | Method::DELETE
+    ) || reload;
     // Serialize policy decisions and writes so a request cannot write with a stale policy.
-    let _guard = if write {
+    let _guard = if write && !process_route {
         Some(app.writes.lock().await)
     } else {
         None
@@ -193,16 +207,17 @@ async fn authorize(
         source,
         TokenUse::Access,
     )?;
-    let permission = if write {
-        Permission::WriteConfig
-    } else {
-        Permission::ReadConfig
+    let permission = match (process_route, write) {
+        (true, true) => Permission::WriteProcess,
+        (true, false) => Permission::ReadProcess,
+        (false, true) => Permission::WriteConfig,
+        (false, false) => Permission::ReadConfig,
     };
     if !identity.permits(permission) {
         return Err(ApiError::forbidden("access denied"));
     }
     if write && settings.api.read_only {
-        return Err(if reload {
+        return Err(if reload || process_route {
             ApiError::not_found()
         } else {
             ApiError::Http(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
@@ -215,6 +230,16 @@ async fn authorize(
         ));
     }
     request.extensions_mut().insert(identity);
+    if process_route {
+        let owner = settings.api.auth.username;
+        request
+            .extensions_mut()
+            .insert(process::Caller(if owner.is_empty() {
+                "$root".into()
+            } else {
+                owner
+            }));
+    }
     Ok(next.run(request).await)
 }
 
@@ -284,6 +309,7 @@ async fn discovery(
             api_version: 3,
             configuration: true,
             configuration_write: !settings.api.read_only,
+            process_engine: true,
             local_login: !auths.is_empty(),
             media: false,
             clustering: false,
@@ -408,6 +434,8 @@ async fn set_config(
         password.is_some() || record.password_hash.is_some(),
     )
     .map_err(|field| ApiError::validation(field, "invalid value"))?;
+    crate::engine::Options::from_document(&effective, &app.environment.engine)
+        .map_err(|error| ApiError::validation("ffmpeg", error.public()))?;
     let new_address = config::address(&settings.address)
         .map_err(|_| ApiError::validation("address", "invalid value"))?;
     if (!app.listening_address().await.ip().is_loopback() || !new_address.ip().is_loopback())
@@ -450,13 +478,17 @@ async fn set_config(
 
 async fn reload_config(State(app): State<Arc<App>>) -> Result<Json<&'static str>, ApiError> {
     let (record, settings) = read_settings(&app).await?;
-    validate(&app.effective(&record)?, record.password_hash.is_some())
+    let effective = app.effective(&record)?;
+    let engine = crate::engine::Options::from_document(&effective, &app.environment.engine)
+        .map_err(|error| ApiError::validation("ffmpeg", error.public()))?;
+    validate(&effective, record.password_hash.is_some())
         .map_err(|field| ApiError::validation(field, "invalid value"))?;
     let address = config::address(&settings.address)
         .map_err(|_| ApiError::validation("address", "invalid value"))?;
     app.reload_address(address)
         .await
         .map_err(|detail| ApiError::validation("address", detail))?;
+    app.processes.options(engine);
     (app.on_reload)(&settings.log.level);
     *app.loaded_at.write().await = timestamp()?;
     Ok(Json("OK"))

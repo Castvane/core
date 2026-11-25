@@ -79,6 +79,7 @@ pub struct Capabilities {
     pub api_version: u8,
     pub configuration: bool,
     pub configuration_write: bool,
+    pub process_engine: bool,
     pub local_login: bool,
     pub media: bool,
     pub clustering: bool,

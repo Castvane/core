@@ -4,17 +4,19 @@ An independently implemented FFmpeg orchestration backend intended to be compati
 
 ## Development
 
-Install stable Rust (edition 2024 or newer), then run:
+Install Rust using rustup (the repository pins the toolchain), then run:
 
 ```sh
-cargo run
+cargo run --locked
 curl http://127.0.0.1:8080/ping
-cargo test
+cargo test --locked
 ```
 
 The starter exposes only the existing plain-text liveness endpoint (`pong`). It binds to loopback by default; `CORE_BIND_ADDR` overrides the address. No media processing, authentication, or UI compatibility is implemented yet.
 
 Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap and compatibility contract. The Go reference remains on `vod` at commit `452e9429`.
+
+See [bootstrap decisions](docs/BOOTSTRAP.md) for the Linux amd64/arm64 target policy, FFmpeg distribution model, pinned reference UI versions, and verification checklist.
 
 ## Licensing
 

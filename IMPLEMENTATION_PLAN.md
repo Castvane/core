@@ -32,7 +32,7 @@ Start with a single binary and library. Split into Cargo workspace crates as the
 
 ### 0 — Bootstrap (current)
 
-Create Rust package, liveness endpoint, contract test and CI. Use the MIT license. Decide supported OS/architecture, FFmpeg distribution model, and reference UI versions. Commit the Cargo lockfile once dependencies can be resolved. Pin CI actions and enforce locked builds before releases.
+Create Rust package, liveness endpoint, contract test and CI. Use the MIT license. See [bootstrap decisions and exit checklist](docs/BOOTSTRAP.md) for supported platforms, FFmpeg distribution, pinned reference UI versions, committed lockfile, toolchain, and verification status. CI uses pinned actions and locked build commands.
 
 ### 1 — Contract and foundation
 

@@ -21,12 +21,7 @@ mod tests {
     #[tokio::test]
     async fn legacy_ping_contract() {
         let response = router()
-            .oneshot(
-                Request::builder()
-                    .uri("/ping")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);

@@ -1,20 +1,33 @@
 #![forbid(unsafe_code)]
 
-use std::{env, error::Error, net::SocketAddr};
+use std::{net::SocketAddr, sync::Arc};
+
+use axum::serve::{Listener, ListenerExt};
+use restreamer_core::{App, StartupError, config::Environment};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
+async fn main() -> Result<(), StartupError> {
+    let mut app = App::open(Environment::read()?).await?;
+    let configured_level = app.log_level().await?;
+    let explicit_filter = EnvFilter::try_from_default_env().ok();
+    let reloadable = explicit_filter.is_none();
+    let (filter, handle) = tracing_subscriber::reload::Layer::new(
+        explicit_filter.unwrap_or_else(|| log_filter(&configured_level)),
+    );
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_ansi(false))
         .init();
-
-    let address: SocketAddr = env::var("CORE_BIND_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:8080".to_owned())
-        .parse()?;
-    let listener = tokio::net::TcpListener::bind(address).await?;
+    if reloadable {
+        app.set_reload_hook(move |level| {
+            if handle.reload(log_filter(level)).is_err() {
+                tracing::error!("failed to apply log level");
+            }
+        });
+    }
+    let listener = app.bind().await?;
+    let app = Arc::new(app);
     tracing::info!(address = %listener.local_addr()?, "restreamer core listening");
 
     #[cfg(unix)]
@@ -25,10 +38,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(not(unix))]
     let shutdown = shutdown();
 
-    axum::serve(listener, restreamer_core::router())
-        .with_graceful_shutdown(shutdown)
-        .await?;
-    Ok(())
+    let result = axum::serve(
+        listener.tap_io(|stream| {
+            if stream.set_nodelay(true).is_err() {
+                tracing::debug!("could not set TCP_NODELAY");
+            }
+        }),
+        restreamer_core::router(app.clone()).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await;
+    app.close().await;
+    Ok(result?)
 }
 
 #[cfg(unix)]
@@ -48,4 +69,8 @@ async fn shutdown() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "failed to listen for shutdown");
     }
+}
+
+fn log_filter(level: &str) -> EnvFilter {
+    EnvFilter::new(if level == "silent" { "off" } else { level })
 }

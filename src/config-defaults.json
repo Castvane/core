@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "id": "",
+  "name": "restreamer",
+  "address": "127.0.0.1:8080",
+  "update_check": true,
+  "log": {"level":"info","topics":[],"max_lines":1000},
+  "db": {"dir":"./config"},
+  "host": {"name":[],"auto":true},
+  "compress": {"encoding":["gzip"],"mimetypes":["text/plain","text/html","text/css","text/javascript","application/json","application/x-mpegurl","application/vnd.apple.mpegurl","image/svg+xml","text/event-stream","application/x-json-stream"],"min_length":1000},
+  "api": {
+    "read_only":false,
+    "access":{"http":{"allow":[],"block":[]},"https":{"allow":[],"block":[]}},
+    "auth":{"enable":false,"disable_localhost":false,"username":"","password":"","jwt":{"secret":""},"auth0":{"enable":false,"tenants":[]}}
+  },
+  "tls":{"address":":8181","enable":false,"auto":false,"email":"cert@datarhei.com","staging":false,"secret":"","cert_file":"","key_file":""},
+  "storage":{
+    "disk":{"dir":"./data","max_size_mbytes":0,"cache":{"enable":true,"max_size_mbytes":0,"ttl_seconds":300,"max_file_size_mbytes":1,"types":{"allow":[],"block":[".m3u8",".mpd"]}}},
+    "memory":{"auth":{"enable":true,"username":"admin","password":""},"max_size_mbytes":0,"purge":false,"backup":{"dir":"","patterns":[]}},
+    "s3":[],"cors":{"origins":["*"]},"mimetypes_file":"",
+    "mimetypes":{
+      ".css":"text/css",".gif":"image/gif",".htm":"text/html",".html":"text/html",
+      ".ico":"image/vnd.microsoft.icon",".jpeg":"image/jpeg",".jpg":"image/jpeg",".js":"text/javascript",
+      ".json":"application/json",".m3u8":"application/vnd.apple.mpegurl",".mp3":"audio/mpeg",
+      ".mp4":"video/mp4",".ogg":"audio/ogg",".png":"image/png",".svg":"image/svg+xml",
+      ".ts":"video/MP2T",".ttf":"font/ttf",".txt":"text/plain",".wav":"audio/wav",
+      ".woff":"font/woff",".woff2":"font/woff2",".xml":"application/xml"
+    }
+  },
+  "rtmp":{"enable":false,"enable_tls":false,"address":":1935","address_tls":":1936","app":"/","token":"","httpflv":{"enable":false,"mount":"/rtmp"}},
+  "srt":{"enable":false,"address":":6000","passphrase":"","token":"","log":{"enable":false,"topics":[]}},
+  "ffmpeg":{"binary":"ffmpeg","max_processes":0,"disable_throttling":false,"access":{"input":{"allow":[],"block":[]},"output":{"allow":[],"block":[]}},"log":{"max_lines":50,"max_history":3,"max_minimal_history":0}},
+  "playout":{"enable":false,"min_port":0,"max_port":0},
+  "debug":{"profiling":false,"force_gc":0,"memory_limit_mbytes":0,"auto_max_procs":false,"agent_address":""},
+  "metrics":{"enable":false,"enable_prometheus":false,"range_sec":300,"interval_sec":2},
+  "sessions":{"enable":true,"ip_ignorelist":["127.0.0.1/32","::1/128"],"persist":false,"persist_interval_sec":300,"session_timeout_sec":30,"session_log_path_pattern":"","session_log_buffer_sec":15,"max_bitrate_mbit":0,"max_sessions":0},
+  "service":{"enable":false,"token":"","url":"https://service.datarhei.com"},
+  "router":{"blocked_prefixes":["/api"],"routes":{},"ui_path":""},
+  "resources":{"max_cpu_usage":0,"max_memory_usage":0,"max_gpu_usage":0,"max_gpu_memory_usage":0,"limit_wait_for_sec":0},
+  "cluster":{"enable":false,"id":"","address":"127.0.0.1:8000","peers":[""],"startup_timeout_sec":300,"sync_interval_sec":5,"node_recover_timeout_sec":120,"emergency_leader_timeout_sec":10,"recover_timeout_sec":0,"debug":{"disable_ffmpeg_check":false}}
+}

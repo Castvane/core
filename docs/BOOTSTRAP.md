@@ -48,4 +48,4 @@ Test discovery/login/refresh first; add process creation, playback, configuratio
 - [x] Local format, Clippy, test, release build and HTTP/SIGTERM smoke verification on Linux amd64 (2 unit/contract tests; real HTTP smoke test).
 - [x] Remote CI verification on amd64 and arm64: [run 45606969113](https://github.com/KingIronMan2011/restreamer-core/actions/runs/45606969113), both jobs passed for commit `47e4cae7`.
 
-CI runner labels are documented in [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Phase 0 is complete. No actual v3 management endpoints are implemented yet; Phase 1 is next.
+CI runner labels are documented in [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Phase 0 is complete. See [Phase 1 status](PHASE_1_STATUS.md) for the v3 foundation and its verification.

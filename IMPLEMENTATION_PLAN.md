@@ -34,9 +34,9 @@ Start with a single binary and library. Split into Cargo workspace crates as the
 
 Create Rust package, liveness endpoint, contract test and CI. Use the MIT license. See [bootstrap decisions and exit checklist](docs/BOOTSTRAP.md) for supported platforms, FFmpeg distribution, pinned reference UI versions, committed lockfile, toolchain, and verification status. CI uses pinned actions and locked build commands.
 
-### 1 — Contract and foundation (next)
+### 1 — Contract and foundation
 
-Build the versioned v3 adapter, configuration validation, app discovery, error mappings and authentication/refresh behavior. Add persistent, transactional configuration with migration/versioning, structured logs and authorization checks. Add differential API tests and browser UI boot/login tests against the reference. Include default configuration and environment compatibility inventory.
+Build the versioned v3 adapter, configuration validation, app discovery, error mappings and authentication/refresh behavior. Add persistent, transactional configuration with migration/versioning, structured logs and authorization checks. Exercise the pinned reference through differential API tests. Track owner-run browser acceptance separately from automated validation. See [Phase 1 status](docs/PHASE_1_STATUS.md) and the [API compatibility matrix](docs/API_COMPATIBILITY.md) for the implemented foundation, settings, and known UI version gates.
 
 ### 2 — Single-node process engine
 

@@ -1,6 +1,6 @@
 # Phase 2 status
 
-The single-node Rust Core can create, probe, run, stop, restart, and delete real FFmpeg jobs through API v3. It persists desired state, configuration, metadata and completed reports. Browser acceptance is tracked separately.
+Phase 2 implementation and automated verification are complete. The single-node Rust Core can create, probe, run, stop, restart, and delete real FFmpeg jobs through API v3. It persists desired state, configuration, metadata and completed reports. Browser acceptance is tracked separately.
 
 ## Architecture and persistence
 
@@ -8,7 +8,7 @@ The single-node Rust Core can create, probe, run, stop, restart, and delete real
 - The manager serializes graph mutations and publishes committed changes to per-process supervisors. Each supervisor owns at most one child, waits on a coalescing intent channel, and reaps the old child before starting its replacement. A bounded event channel publishes state transitions. Process mutations keep their queue slot through completion even if the HTTP client disconnects.
 - The command builder resolves references and placeholders at launch, checks access policies, and passes argument vectors to an administrator-configured executable. Probing and capability discovery use separate bounded subprocess captures.
 - Two independent readers drain FFmpeg progress and stderr. Reports keep a bounded ring of recent stderr lines, log-pattern counters, exit reason, final progress and sampled resources.
-- Migration `0002_process_engine.sql` adds jobs, per-process and core metadata, and indexed run histories. Jobs have stable internal IDs and unique `(domain, id)` keys. Rename preserves the internal ID, metadata and history. Foreign keys remove process-owned rows on deletion. Config updates and embedded metadata commit together. Startup applies SQLx migrations, loads the graph, and starts workers from persisted order without restoring stale PIDs or runtime measurements.
+- Migration `0002_process_engine.sql` adds jobs, per-process and core metadata, and indexed run histories. Jobs have stable internal IDs and unique `(domain, id)` keys. Rename preserves the internal ID, metadata and history. Foreign keys remove process-owned rows on deletion. Config updates and embedded metadata commit together. Startup applies SQLx migrations, loads the graph, and starts workers from persisted order without restoring stale PIDs or runtime measurements. Use one standalone Core instance per database.
 
 The pinned Go reference stores process configuration and order through its `restream/store` contract. Its task layer resolves addresses, separates process order from execution, and delegates to the FFmpeg and process packages. The Rust engine keeps that HTTP distinction while using SQLite, Tokio, FFprobe JSON and standard FFmpeg progress. The contract was checked against [Go commit 452e9429](https://github.com/KingIronMan2011/restreamer-core/tree/452e9429c1fd7e1a90d75ed12883171ecabd80eb).
 
@@ -88,7 +88,7 @@ python3 scripts/differential-process.py http://127.0.0.1:18880 http://127.0.0.1:
 cargo test --locked --test process_engine four_concurrent_ffmpeg_jobs -- --ignored --nocapture
 ```
 
-Local Linux AMD64 verification passed formatting, Clippy with warnings denied, 19 automated tests, the locked release build and the HTTP/SIGTERM smoke test. The differential script matched 24 process checks against Go 1.27.4 and FFmpeg 7.1.5. A database created by the Phase 1 binary upgraded through migration 2 and passed SQLite integrity checks.
+Local Linux AMD64 verification passed formatting, Clippy with warnings denied, 19 automated tests, the locked release build and the HTTP/SIGTERM smoke test. The differential script matched 24 process checks against Go 1.27.4 and FFmpeg 7.1.5. The Phase 1 differential suite also matched 24 checks on the release binary. A database created by the Phase 1 binary upgraded through migration 2 and passed SQLite integrity checks. Both native Linux jobs passed on implementation commit `f98b90f`. [AMD64 and ARM64 CI](https://github.com/KingIronMan2011/restreamer-core/actions/runs/45620579168)
 
 The performance fixture launches four two-second, real-time 64×64 FFmpeg jobs at 12 FPS. It completed 96 output frames in 1.933 seconds from first submission to all reports on the local Linux AMD64 environment with FFmpeg 7.1.5. This is a local Rust Core baseline.
 

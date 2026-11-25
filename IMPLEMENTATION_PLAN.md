@@ -38,7 +38,7 @@ Create Rust package, liveness endpoint, contract test and CI. Use the MIT licens
 
 Build the versioned v3 adapter, configuration validation, app discovery, error mappings and authentication/refresh behavior. Add persistent, transactional configuration with migration/versioning, structured logs and authorization checks. Exercise the pinned reference through differential API tests. Track owner-run browser acceptance separately from automated validation. See [Phase 1 status](docs/PHASE_1_STATUS.md) and the [API compatibility matrix](docs/API_COMPATIBILITY.md) for the implemented foundation, settings, and known UI version gates.
 
-### 2 — Single-node process engine
+### 2 — Single-node process engine (implementation verified)
 
 Implement process CRUD, desired versus observed state, start/stop/restart, probing, per-process logs, progress and reports, references/placeholders, scheduled starts, validation, retry/backoff, stall detection and bounded history. Use argument vectors rather than shell interpolation. Supervise process groups, enforce cancellation/timeouts and prevent child leaks. Store public metadata separately from secrets. Test concurrent commands, crashes, restart reconciliation, absent FFmpeg, and long-running streams. The process API can create and manage a real local stream. Track manual UI acceptance, version gates and later media dependencies separately. See [Phase 2 status](docs/PHASE_2_STATUS.md) for compatibility and verification.
 

@@ -1,6 +1,6 @@
 # Phase 1 status
 
-The Rust Core implements discovery, local authentication, configuration, and single-node persistence. Gated browser acceptance for existing UIs is pending.
+Phase 1 implementation and automated verification are complete for the Rust API foundation. Manual browser acceptance for existing UIs remains open.
 
 ## Implementation
 
@@ -36,7 +36,7 @@ Configuration policy updates take effect on successful PUT. Reload revalidates e
 
 On Linux AMD64, formatting, Clippy with warnings denied, seven Rust tests, the locked release build and the HTTP/SIGTERM smoke test passed. The isolated differential run matched 24 contract checks against Go 1.27.4 and FFmpeg 7.1.5.
 
-The native Rust suite covers discovery, the legacy fixture envelopes, credential validation and throttling, JWT claims and expiration, policy, versioned partial updates, concurrent writes, rollback on validation error, SQLite initialization, migration and persistence across restarts. The shell smoke test exercises the actual HTTP listener and SIGTERM shutdown. The Rust workflow runs these checks on native Linux AMD64 and ARM64.
+The native Rust suite covers discovery, the legacy fixture envelopes, credential validation and throttling, JWT claims and expiration, policy, versioned partial updates, concurrent writes, rollback on validation error, SQLite initialization, migration and persistence across restarts. The shell smoke test exercises the actual HTTP listener and SIGTERM shutdown. The native Linux AMD64 and ARM64 jobs both passed on implementation commit `d01b8d6`. [GitHub Actions run 45613193081](https://github.com/KingIronMan2011/restreamer-core/actions/runs/45613193081)
 
 For differential testing, build the pinned Go reference with Go 1.27 and install FFmpeg/FFprobe. Run the Go binary in an empty disposable directory with `config/` and `data/` subdirectories. Run the Rust binary with a separate temporary database. Use distinct loopback ports and the same `CORE_API_AUTH_ENABLE=true`, `CORE_HOST_AUTO=false`, `CORE_UPDATE_CHECK=false`, `CORE_API_AUTH_USERNAME` and `CORE_API_AUTH_PASSWORD` on both. Provide the fixture credentials to the script via `PHASE1_TEST_USERNAME` and `PHASE1_TEST_PASSWORD`.
 

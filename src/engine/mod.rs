@@ -1,5 +1,5 @@
 mod command;
-mod executable;
+pub(crate) mod executable;
 mod model;
 mod probe;
 mod progress;
@@ -240,6 +240,12 @@ impl Engine {
         }
     }
 
+    pub fn update_media(&self, endpoints: crate::media::Endpoints) {
+        let current = self.options.borrow().clone();
+        self.options
+            .send_replace(Arc::new((*current).clone().with_media(endpoints)));
+    }
+
     pub fn options(&self, options: Options) {
         self.options.send_replace(Arc::new(options));
     }
@@ -464,7 +470,7 @@ impl Engine {
                 let options = engine.options.borrow().clone();
                 if tokio::time::timeout(
                     std::time::Duration::from_secs(1),
-                    command::clean_outputs(&options, &job.config, true),
+                    command::clean_outputs(&options, &job.config, true, &engine.graph),
                 )
                 .await
                 .is_err()

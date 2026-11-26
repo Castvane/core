@@ -128,7 +128,7 @@ async fn discovery_local_login_refresh_and_policy() {
     assert_eq!(about["app"], "datarhei-core");
     assert_eq!(about["auths"], fixture["authentication_methods"]);
     assert!(about.get("id").is_none());
-    assert_eq!(about["capabilities"]["media"], false);
+    assert_eq!(about["capabilities"]["media"], true);
     assert_eq!(
         server.request("GET", "/api/v3/config", None, None).await,
         (StatusCode::FORBIDDEN, fixture["access_denied"].clone())
@@ -379,7 +379,7 @@ async fn startup_migrates_existing_data_and_database_contains_no_plain_password(
             .fetch_one(&pool)
             .await
             .unwrap(),
-        2
+        3
     );
     pool.close().await;
     let migrated = Instance::open(&dir, &[]).await;

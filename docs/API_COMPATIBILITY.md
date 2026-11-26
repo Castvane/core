@@ -88,3 +88,7 @@ The Phase 2 rows are implemented. See [Phase 2 status](PHASE_2_STATUS.md) for cu
 | 6 | GET `/api/graph`, POST `/api/graph/query` | Playground and GraphQL JSON request with `query`, optional `operationName` and `variables`. GraphQL field-level coverage tracks the underlying features in Phases 2–5 |
 
 `/api/v4` is reserved and contains no endpoints.
+
+## Phase 3 media routes
+
+See the [media API matrix](PHASE_3_STATUS.md#rest-api) for methods, query fields, storage and alias contracts, feature gates, media mounts and known interoperability limits.

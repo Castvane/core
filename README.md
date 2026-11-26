@@ -16,6 +16,8 @@ The server binds to loopback by default. It exposes liveness, legacy discovery, 
 
 Install FFmpeg and FFprobe to run single-node processes. The v3 process API supports lifecycle commands, probing, progress, reports, schedules and restart reconciliation. Use `CORE_FFMPEG_BINARY` or `CORE_FFPROBE_BINARY` to select custom executable paths. See [Phase 2 status](docs/PHASE_2_STATUS.md) for the contracts and deployment settings.
 
+The media service supports disk, memory and S3 mounts, HTTP byte ranges, HLS and DASH, viewer tokens and filesystem aliases. Install MediaMTX to enable RTMP, RTMPS, SRT and HTTP-FLV. See [Phase 3 status](docs/PHASE_3_STATUS.md) for deployment examples, test commands and compatibility limits.
+
 See [Phase 1 status](docs/PHASE_1_STATUS.md) for authentication, configuration and manual UI testing. The [compatibility matrix](docs/API_COMPATIBILITY.md) describes the wire contract and UI initialization limits.
 
 Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap and compatibility contract. The Go reference remains on `vod` at commit `452e9429`.

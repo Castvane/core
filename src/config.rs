@@ -31,8 +31,7 @@ pub struct ApiSettings {
 #[derive(Deserialize)]
 pub struct AccessSettings {
     pub http: NetworkPolicy,
-    #[serde(rename = "https")]
-    _https: NetworkPolicy,
+    pub https: NetworkPolicy,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +59,7 @@ struct StorageBucket {
     bucket: String,
     region: String,
     use_ssl: bool,
+    virtual_hosted_style: bool,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -148,6 +148,36 @@ impl Environment {
             ("ffmpeg.binary", &["CORE_FFMPEG_BINARY"][..]),
             ("ffmpeg.probe_binary", &["CORE_FFPROBE_BINARY"][..]),
             ("storage.disk.dir", &["CORE_STORAGE_DISK_DIR"][..]),
+            (
+                "rtmp.transport_binary",
+                &["CORE_MEDIA_TRANSPORT_BINARY"][..],
+            ),
+            ("rtmp.address", &["CORE_RTMP_ADDRESS"][..]),
+            ("rtmp.address_tls", &["CORE_RTMP_ADDRESS_TLS"][..]),
+            ("rtmp.app", &["CORE_RTMP_APP"][..]),
+            ("rtmp.token", &["CORE_RTMP_TOKEN"][..]),
+            ("rtmp.httpflv.mount", &["CORE_RTMP_HTTPFLV_MOUNT"][..]),
+            ("srt.address", &["CORE_SRT_ADDRESS"][..]),
+            ("srt.passphrase", &["CORE_SRT_PASSPHRASE"][..]),
+            ("srt.token", &["CORE_SRT_TOKEN"][..]),
+            ("tls.trust_file", &["CORE_TLS_TRUST_FILE"][..]),
+            ("tls.address", &["CORE_TLS_ADDRESS"][..]),
+            (
+                "tls.cert_file",
+                &["CORE_TLS_CERT_FILE", "CORE_TLS_CERTFILE"][..],
+            ),
+            (
+                "tls.key_file",
+                &["CORE_TLS_KEY_FILE", "CORE_TLS_KEYFILE"][..],
+            ),
+            (
+                "storage.memory.auth.username",
+                &["CORE_STORAGE_MEMORY_AUTH_USERNAME", "CORE_MEMFS_USERNAME"][..],
+            ),
+            (
+                "storage.memory.auth.password",
+                &["CORE_STORAGE_MEMORY_AUTH_PASSWORD", "CORE_MEMFS_PASSWORD"][..],
+            ),
             ("router.ui_path", &["CORE_ROUTER_UI_PATH"][..]),
         ] {
             if let Some(value) = keys.iter().find_map(|key| get(key)) {
@@ -165,6 +195,19 @@ impl Environment {
             ),
             ("api.auth.auth0.enable", "CORE_API_AUTH_AUTH0_ENABLE"),
             ("rtmp.enable", "CORE_RTMP_ENABLE"),
+            ("rtmp.enable_tls", "CORE_RTMP_ENABLE_TLS"),
+            ("rtmp.httpflv.enable", "CORE_RTMP_HTTPFLV_ENABLE"),
+            (
+                "storage.disk.cache.enable",
+                "CORE_STORAGE_DISK_CACHE_ENABLE",
+            ),
+            ("storage.private", "CORE_STORAGE_PRIVATE"),
+            ("storage.memory.purge", "CORE_STORAGE_MEMORY_PURGE"),
+            (
+                "storage.memory.auth.enable",
+                "CORE_STORAGE_MEMORY_AUTH_ENABLE",
+            ),
+            ("sessions.enable", "CORE_SESSIONS_ENABLE"),
             ("srt.enable", "CORE_SRT_ENABLE"),
             ("tls.enable", "CORE_TLS_ENABLE"),
             ("metrics.enable", "CORE_METRICS_ENABLE"),
@@ -264,6 +307,112 @@ impl Environment {
             if let Some(value) = get(key) {
                 overrides.insert(path, json!(value.split_whitespace().collect::<Vec<_>>()));
             }
+        }
+        for (path, keys) in [
+            (
+                "storage.disk.max_size_mbytes",
+                &[
+                    "CORE_STORAGE_DISK_MAX_SIZE_MBYTES",
+                    "CORE_STORAGE_DISK_MAXSIZEMBYTES",
+                ][..],
+            ),
+            (
+                "storage.memory.max_size_mbytes",
+                &[
+                    "CORE_STORAGE_MEMORY_MAX_SIZE_MBYTES",
+                    "CORE_STORAGE_MEMORY_MAXSIZEMBYTES",
+                ][..],
+            ),
+            (
+                "storage.disk.cache.max_size_mbytes",
+                &[
+                    "CORE_STORAGE_DISK_CACHE_MAX_SIZE_MBYTES",
+                    "CORE_STORAGE_DISK_CACHE_MAXSIZEMBYTES",
+                ][..],
+            ),
+            (
+                "storage.disk.cache.max_file_size_mbytes",
+                &[
+                    "CORE_STORAGE_DISK_CACHE_MAX_FILE_SIZE_MBYTES",
+                    "CORE_STORAGE_DISK_CACHE_MAXFILESIZEMBYTES",
+                ][..],
+            ),
+            (
+                "storage.disk.cache.ttl_seconds",
+                &[
+                    "CORE_STORAGE_DISK_CACHE_TTL_SECONDS",
+                    "CORE_STORAGE_DISK_CACHE_TTLSECONDS",
+                ][..],
+            ),
+            (
+                "storage.upload_bitrate_kbit",
+                &["CORE_STORAGE_UPLOAD_BITRATE_KBIT"][..],
+            ),
+            (
+                "storage.download_bitrate_kbit",
+                &["CORE_STORAGE_DOWNLOAD_BITRATE_KBIT"][..],
+            ),
+            (
+                "sessions.session_timeout_sec",
+                &["CORE_SESSIONS_SESSION_TIMEOUT_SEC"][..],
+            ),
+            (
+                "sessions.max_sessions",
+                &["CORE_SESSIONS_MAX_SESSIONS", "CORE_SESSIONS_MAXSESSIONS"][..],
+            ),
+            (
+                "sessions.max_viewers_per_stream",
+                &["CORE_SESSIONS_MAX_VIEWERS_PER_STREAM"][..],
+            ),
+            (
+                "sessions.max_bitrate_mbit",
+                &[
+                    "CORE_SESSIONS_MAX_BITRATE_MBIT",
+                    "CORE_SESSIONS_MAXBITRATE_MBIT",
+                ][..],
+            ),
+            (
+                "sessions.stream_bitrate_kbit",
+                &["CORE_SESSIONS_STREAM_BITRATE_KBIT"][..],
+            ),
+            (
+                "sessions.session_bitrate_kbit",
+                &["CORE_SESSIONS_SESSION_BITRATE_KBIT"][..],
+            ),
+        ] {
+            if let Some(value) = keys.iter().find_map(|key| get(key)) {
+                overrides.insert(
+                    path,
+                    json!(value.parse::<u64>().map_err(|_| "invalid media limit")?),
+                );
+            }
+        }
+        for (path, keys) in [
+            (
+                "storage.disk.cache.types.allow",
+                &[
+                    "CORE_STORAGE_DISK_CACHE_TYPES_ALLOW",
+                    "CORE_STORAGE_DISK_CACHE_TYPES",
+                ][..],
+            ),
+            (
+                "storage.disk.cache.types.block",
+                &["CORE_STORAGE_DISK_CACHE_TYPES_BLOCK"][..],
+            ),
+        ] {
+            if let Some(value) = keys.iter().find_map(|key| get(key)) {
+                overrides.insert(path, json!(value.split_whitespace().collect::<Vec<_>>()));
+            }
+        }
+        if let Some(value) = get("CORE_STORAGE_S3_JSON") {
+            let stores: Value =
+                serde_json::from_str(&value).map_err(|_| "invalid CORE_STORAGE_S3_JSON")?;
+            if !stores.is_array() {
+                return Err("CORE_STORAGE_S3_JSON must be an array");
+            }
+            overrides.insert("storage.s3", stores);
+        } else if let Some(value) = get("CORE_STORAGE_S3") {
+            overrides.insert("storage.s3", parse_legacy_s3(&value)?);
         }
         Ok(Self {
             engine: crate::engine::Overrides {
@@ -457,4 +606,32 @@ pub fn redact(value: &mut Value) {
         Value::Array(items) => items.iter_mut().for_each(redact),
         _ => {}
     }
+}
+
+fn parse_legacy_s3(value: &str) -> Result<Value, &'static str> {
+    let invalid = "invalid CORE_STORAGE_S3";
+    let mut stores = Vec::new();
+    for address in value.split('|').filter(|value| !value.is_empty()) {
+        let url = url::Url::parse(address).map_err(|_| invalid)?;
+        let host = url.host_str().ok_or(invalid)?;
+        let (region, host) = host.split_once('.').ok_or(invalid)?;
+        let endpoint = if let Some(port) = url.port() {
+            format!("{host}:{port}")
+        } else {
+            host.to_owned()
+        };
+        let pairs: BTreeMap<_, _> = url.query_pairs().collect();
+        let decode = |value: &str| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8()
+                .map(|v| v.into_owned())
+                .map_err(|_| invalid)
+        };
+        stores.push(json!({
+            "name":pairs.get("name"),"mountpoint":pairs.get("mount"),"region":region,"endpoint":endpoint,
+            "access_key_id":decode(url.username())?,"secret_access_key":decode(url.password().ok_or(invalid)?)?,
+            "bucket":url.path().trim_start_matches('/'),"use_ssl":url.scheme()=="https"
+        }));
+    }
+    Ok(json!(stores))
 }

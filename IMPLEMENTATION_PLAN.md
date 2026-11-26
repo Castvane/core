@@ -44,7 +44,7 @@ Implement process CRUD, desired versus observed state, start/stop/restart, probi
 
 ### 3 — Media and storage
 
-Support RTMP/SRT input/output, HTTP/HLS/DASH and FLV where required by reference behavior, disk/memory/S3 storage, range requests, correct HEAD semantics, aliases and playlist rewriting. Bound memory, disk and bandwidth usage. Prefer shared immutable reference-counted media buffers to full copies. Verify stream interoperability, slow clients, cleanup, storage failures and access controls. Add playout and viewer/session compatibility.
+The Rust media service integrates disk, memory and S3 mounts with HTTP delivery, HLS/DASH, MediaMTX RTMP/RTMPS and SRT, HTTP-FLV, viewer sessions, aliases, caching and cleanup. [Phase 3 status](docs/PHASE_3_STATUS.md) tracks automated verification, manual UI acceptance and the extended FFmpeg dependency for live playout control.
 
 ### 4 — Operations and IAM
 

@@ -731,13 +731,14 @@ async fn four_concurrent_ffmpeg_jobs() {
 #[tokio::test]
 async fn dynamic_references_reuse_the_producer_endpoint_and_cleanup_is_scoped() {
     let dir = TempDir::new().unwrap();
+    let media_dir = dir.path().join("media");
     let ffmpeg = dir.path().join("dynamic-ffmpeg");
     mock(&ffmpeg, "echo frame=1\necho progress=continue\nsleep 600");
     let server = Server::open(
         &dir,
         &[
             ("CORE_FFMPEG_BINARY", ffmpeg.to_str().unwrap()),
-            ("CORE_STORAGE_DISK_DIR", dir.path().to_str().unwrap()),
+            ("CORE_STORAGE_DISK_DIR", media_dir.to_str().unwrap()),
         ],
     )
     .await;
@@ -770,7 +771,7 @@ async fn dynamic_references_reuse_the_producer_endpoint_and_cleanup_is_scoped() 
         .await;
     assert_eq!(consumer["progress"]["inputs"][0]["address"], address);
     tokio::fs::write(address, b"fixture").await.unwrap();
-    let untouched = dir.path().join("unrelated.mkv");
+    let untouched = media_dir.join("unrelated.mkv");
     tokio::fs::write(&untouched, b"fixture").await.unwrap();
     server
         .expect(200, "DELETE", "/api/v3/process/producer", None)

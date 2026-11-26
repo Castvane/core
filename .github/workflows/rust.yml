@@ -20,10 +20,11 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg openssl
       - run: rustup show active-toolchain && cargo --version
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked --all-targets --all-features
+      - run: bash scripts/test-media-services.sh
       - run: cargo build --locked --release
       - run: bash scripts/smoke-test.sh target/release/restreamer-core

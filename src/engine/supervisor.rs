@@ -182,10 +182,13 @@ impl Supervisor {
                 process: job.uid.clone(),
                 execution: exit.state,
             });
-            if !*self.shutdown.borrow() && !updates.has_changed().unwrap_or(true) {
+            if !*self.shutdown.borrow()
+                && !updates.has_changed().unwrap_or(true)
+                && let Some(graph) = self.graph.upgrade()
+            {
                 let _ = tokio::time::timeout(
                     Duration::from_secs(1),
-                    super::command::clean_outputs(&options, &job.config, false),
+                    super::command::clean_outputs(&options, &job.config, false, &graph),
                 )
                 .await;
             }
@@ -325,10 +328,10 @@ impl Supervisor {
                 status = child.wait() => break Exit::natural(status),
                 _ = sample.tick() => {
                     cleanup_ticks += 1;
-                    if cleanup_ticks >= 30 {
+                    if cleanup_ticks >= 30 && let Some(graph) = self.graph.upgrade() {
                         cleanup_ticks = 0;
                         let _ = tokio::time::timeout(Duration::from_millis(200),
-                            super::command::clean_outputs(options,config,false)).await;
+                            super::command::clean_outputs(options,config,false,&graph)).await;
                     }
                     let cpu_sampled = monitor.sample(pid, &mut usage).await;
                     lock(state).usage = usage.clone();

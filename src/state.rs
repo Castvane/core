@@ -14,6 +14,7 @@ use crate::{
     config::{self, Environment, SCHEMA, Settings},
     engine::{Engine, Options},
     listener::ReloadableListener,
+    media::Media,
     persistence::{Record, Store},
 };
 
@@ -22,10 +23,12 @@ pub type StartupError = Box<dyn std::error::Error + Send + Sync>;
 pub struct App {
     pub(crate) store: Store,
     pub(crate) auth: Authentication,
+    pub(crate) media: Arc<Media>,
     pub(crate) processes: Arc<Engine>,
     pub(crate) environment: Environment,
     pub(crate) started_at: OffsetDateTime,
     listening: RwLock<SocketAddr>,
+    local_address: RwLock<SocketAddr>,
     replacement: Option<mpsc::Sender<TcpListener>>,
     pub(crate) loaded_at: tokio::sync::RwLock<String>,
     pub(crate) requests: tokio::sync::Semaphore,
@@ -136,20 +139,51 @@ impl App {
             .as_ref()
             .map_or(persisted, |key| Zeroizing::new(key.as_bytes().to_vec()));
         tx.commit().await?;
+        let root_path = effective["storage"]["disk"]["dir"]
+            .as_str()
+            .ok_or("invalid storage directory")?;
+        if !root_path.is_empty() {
+            tokio::fs::create_dir_all(root_path).await?;
+            let root = tokio::fs::canonicalize(root_path).await?;
+            let database = tokio::fs::canonicalize(&environment.db).await?;
+            if database.starts_with(&root) {
+                return Err("SQLite database must be outside the public storage directory".into());
+            }
+            if let Some(private_key) = effective["tls"]["key_file"].as_str()
+                && !private_key.is_empty()
+                && tokio::fs::canonicalize(private_key)
+                    .await
+                    .is_ok_and(|key| key.starts_with(&root))
+            {
+                return Err("TLS private key must be outside the public storage directory".into());
+            }
+        }
+        let media = Arc::new(
+            Media::open(
+                store.0.clone(),
+                &effective,
+                key.clone(),
+                environment.engine.launcher.clone(),
+            )
+            .await?,
+        );
         let auth = Authentication::new(key).await?;
         environment.clear_secrets();
         let processes = Engine::open(
             store.0.clone(),
-            Options::from_document(&effective, &environment.engine)?,
+            Options::from_document(&effective, &environment.engine)?
+                .with_media(media.endpoints(listening)),
         )
         .await?;
         Ok(Self {
             store,
             auth,
+            media,
             processes,
             environment,
             started_at: now,
             listening: RwLock::new(listening),
+            local_address: RwLock::new(listening),
             replacement: None,
             loaded_at: tokio::sync::RwLock::new(timestamp),
             requests: tokio::sync::Semaphore::new(128),
@@ -160,6 +194,9 @@ impl App {
 
     pub async fn bind(&mut self) -> std::io::Result<ReloadableListener> {
         let listener = TcpListener::bind(*self.listening.get_mut()).await?;
+        let local = listener.local_addr()?;
+        *self.local_address.get_mut() = local;
+        self.processes.update_media(self.media.endpoints(local));
         let (sender, receiver) = mpsc::channel(1);
         self.replacement = Some(sender);
         Ok(ReloadableListener::new(listener, receiver))
@@ -167,6 +204,10 @@ impl App {
 
     pub(crate) async fn listening_address(&self) -> SocketAddr {
         *self.listening.read().await
+    }
+
+    pub(crate) async fn media_address(&self) -> SocketAddr {
+        *self.local_address.read().await
     }
 
     pub(crate) async fn reload_address(&self, address: SocketAddr) -> Result<(), &'static str> {
@@ -186,6 +227,7 @@ impl App {
             .map_err(|_| "could not inspect configured listener")?;
         slot.send(listener);
         *listening = address;
+        *self.local_address.write().await = local;
         tracing::info!(address = %local, "HTTP listener reconfigured");
         Ok(())
     }
@@ -204,8 +246,29 @@ impl App {
         self.on_reload = Arc::new(hook);
     }
 
+    pub async fn bind_tls(&self) -> Result<Option<crate::tls::TlsListener>, StartupError> {
+        let record = self.store.read().await?;
+        let doc = self.effective(&record)?;
+        if doc["tls"]["enable"].as_bool() == Some(true)
+            && doc["tls"]["address"]
+                .as_str()
+                .and_then(|address| config::address(address).ok())
+                .is_some_and(|address| !address.ip().is_loopback())
+            && doc["api"]["auth"]["enable"].as_bool() != Some(true)
+            && !self.environment.allow_insecure
+        {
+            return Err("authentication is required for the external HTTPS listener".into());
+        }
+        crate::tls::TlsListener::bind(&doc["tls"]).await
+    }
+
+    pub fn stop_media_delivery(&self) {
+        self.media.stop.cancel();
+    }
+
     pub async fn close(&self) {
         self.processes.close().await;
+        self.media.close().await;
         self.store.close().await;
     }
 }

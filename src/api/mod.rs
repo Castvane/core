@@ -1,5 +1,7 @@
 mod dto;
 mod error;
+mod media;
+mod media_http;
 mod openapi;
 mod process;
 mod process_dto;
@@ -39,6 +41,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/config", get(get_config).put(set_config))
         .route("/config/reload", get(reload_config))
         .merge(process::routes())
+        .merge(media::routes())
         .route_layer(middleware::from_fn_with_state(app.clone(), authorize));
     let documentation = Router::new()
         .route("/api/swagger", get(openapi::redirect))
@@ -60,8 +63,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/login", post(login))
         .route("/api/login/refresh", get(refresh))
         .merge(documentation)
+        .route("/api/v3/widget/process/{id}", get(media::widget))
         .nest(LEGACY_API_PREFIX, management)
-        .fallback(|| async { ApiError::not_found() })
+        .fallback(media_http::public)
         .method_not_allowed_fallback(|| async {
             ApiError::Http(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
         })
@@ -72,13 +76,19 @@ pub fn router(app: Arc<App>) -> Router {
 
 async fn correlate(State(app): State<Arc<App>>, request: Request, next: Next) -> Response {
     let id = Uuid::new_v4().to_string();
+    let upload = matches!(*request.method(), Method::PUT | Method::POST)
+        && (request.uri().path().starts_with("/api/v3/fs")
+            || !request.uri().path().starts_with("/api"));
+
     let route = request
         .extensions()
         .get::<MatchedPath>()
         .map_or("<unmatched>", MatchedPath::as_str);
     let span = tracing::info_span!("http", request_id = %id, method = %request.method(), route);
     async move {
-        let mut response = if let Ok(_limit) = app.requests.try_acquire() {
+        let mut response = if upload {
+            next.run(request).await
+        } else if let Ok(_limit) = app.requests.try_acquire() {
             match tokio::time::timeout(Duration::from_secs(15), next.run(request)).await {
                 Ok(response) => response,
                 Err(_) => {
@@ -93,7 +103,8 @@ async fn correlate(State(app): State<Arc<App>>, request: Request, next: Next) ->
         }
         response
             .headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            .entry(header::CACHE_CONTROL)
+            .or_insert(HeaderValue::from_static("no-store"));
         response.headers_mut().insert(
             "x-content-type-options",
             HeaderValue::from_static("nosniff"),
@@ -110,6 +121,12 @@ fn peer(request: &Request) -> Option<IpAddr> {
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|info| info.0.ip().to_canonical())
+        .or_else(|| {
+            request
+                .extensions()
+                .get::<ConnectInfo<crate::TlsPeer>>()
+                .map(|info| info.0.0.ip().to_canonical())
+        })
 }
 
 async fn read_settings(app: &App) -> Result<(Record, Settings), ApiError> {
@@ -118,8 +135,20 @@ async fn read_settings(app: &App) -> Result<(Record, Settings), ApiError> {
     Ok((record, settings))
 }
 
-fn check_network(settings: &Settings, peer: Option<IpAddr>) -> Result<(), ApiError> {
-    let network = &settings.api.access.http;
+fn check_network(
+    settings: &Settings,
+    request: &Request,
+    peer: Option<IpAddr>,
+) -> Result<(), ApiError> {
+    let network = if request
+        .extensions()
+        .get::<ConnectInfo<crate::TlsPeer>>()
+        .is_some()
+    {
+        &settings.api.access.https
+    } else {
+        &settings.api.access.http
+    };
     let matches = |ranges: &[ipnet::IpNet]| {
         peer.is_some_and(|peer| ranges.iter().any(|range| range.contains(&peer)))
     };
@@ -191,14 +220,14 @@ async fn authorize(
         Method::PUT | Method::POST | Method::DELETE
     ) || reload;
     // Serialize policy decisions and writes so a request cannot write with a stale policy.
-    let _guard = if write && !process_route {
+    let _guard = if write && path.starts_with("/api/v3/config") {
         Some(app.writes.lock().await)
     } else {
         None
     };
     let (record, settings) = read_settings(&app).await?;
     let source = peer(&request);
-    check_network(&settings, source)?;
+    check_network(&settings, &request, source)?;
     let identity = identify(
         &app,
         &record,
@@ -249,7 +278,7 @@ async fn discovery(
 ) -> Result<Json<dto::Discovery<'static>>, ApiError> {
     let (record, settings) = read_settings(&app).await?;
     let source = peer(&request);
-    check_network(&settings, source)?;
+    check_network(&settings, &request, source)?;
     let full = identify(
         &app,
         &record,
@@ -311,7 +340,7 @@ async fn discovery(
             configuration_write: !settings.api.read_only,
             process_engine: true,
             local_login: !auths.is_empty(),
-            media: false,
+            media: true,
             clustering: false,
         },
     }))
@@ -436,6 +465,8 @@ async fn set_config(
     .map_err(|field| ApiError::validation(field, "invalid value"))?;
     crate::engine::Options::from_document(&effective, &app.environment.engine)
         .map_err(|error| ApiError::validation("ffmpeg", error.public()))?;
+    crate::media::validate_settings(&effective)
+        .map_err(|_| ApiError::validation("storage", "invalid media settings"))?;
     let new_address = config::address(&settings.address)
         .map_err(|_| ApiError::validation("address", "invalid value"))?;
     if (!app.listening_address().await.ip().is_loopback() || !new_address.ip().is_loopback())
@@ -488,7 +519,8 @@ async fn reload_config(State(app): State<Arc<App>>) -> Result<Json<&'static str>
     app.reload_address(address)
         .await
         .map_err(|detail| ApiError::validation("address", detail))?;
-    app.processes.options(engine);
+    app.processes
+        .options(engine.with_media(app.media.endpoints(app.media_address().await)));
     (app.on_reload)(&settings.log.level);
     *app.loaded_at.write().await = timestamp()?;
     Ok(Json("OK"))

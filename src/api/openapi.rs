@@ -65,7 +65,143 @@ pub async fn document() -> Json<Value> {
             });
         }
     }
+    media_paths(&mut spec);
     Json(spec)
+}
+
+fn media_paths(spec: &mut Value) {
+    let listing = &[
+        "glob",
+        "pattern",
+        "size_min",
+        "size_max",
+        "lastmod_start",
+        "lastmod_end",
+        "sort",
+        "order",
+    ][..];
+    for (path, methods, query, body) in [
+        ("/fs", &["get"][..], &["details"][..], ""),
+        ("/fs", &["put"][..], &[][..], "StorageOperation"),
+        ("/fs/{storage}", &["get", "delete"][..], listing, ""),
+        (
+            "/fs/{storage}/{path}",
+            &["get", "head", "delete"][..],
+            &[][..],
+            "",
+        ),
+        ("/fs/{storage}/{path}", &["put"][..], &[][..], "binary"),
+        ("/rtmp", &["get"][..], &[][..], ""),
+        ("/rtmp/channels", &["get"][..], &[][..], ""),
+        ("/rtmp/disconnect", &["put"][..], &["path"][..], ""),
+        ("/srt", &["get"][..], &[][..], ""),
+        ("/srt/channels", &["get"][..], &[][..], ""),
+        ("/srt/disconnect", &["put"][..], &[][..], ""),
+        ("/session", &["get"][..], &["collectors"][..], ""),
+        ("/session/active", &["get"][..], &["collectors"][..], ""),
+        (
+            "/session/token/{username}",
+            &["put"][..],
+            &[][..],
+            "ViewerTokens",
+        ),
+        ("/alias", &["get"][..], &[][..], ""),
+        ("/alias", &["post"][..], &[][..], "Alias"),
+        ("/alias", &["put"][..], &[][..], "Aliases"),
+        ("/alias/rule", &["get", "delete"][..], &["pattern"][..], ""),
+        ("/alias/rule", &["put"][..], &["pattern"][..], "Alias"),
+        ("/widget/process/{id}", &["get"][..], &["domain"][..], ""),
+        (
+            "/process/{id}/playout/{input}/status",
+            &["get"][..],
+            &["domain"][..],
+            "",
+        ),
+        (
+            "/process/{id}/playout/{input}/reopen",
+            &["get"][..],
+            &["domain"][..],
+            "",
+        ),
+        (
+            "/process/{id}/playout/{input}/stream",
+            &["put"][..],
+            &["domain"][..],
+            "",
+        ),
+        (
+            "/process/{id}/playout/{input}/keyframe/{name}",
+            &["get"][..],
+            &["domain"][..],
+            "",
+        ),
+        (
+            "/process/{id}/playout/{input}/errorframe/encode",
+            &["get"][..],
+            &["domain"][..],
+            "",
+        ),
+        (
+            "/process/{id}/playout/{input}/errorframe/{name}",
+            &["put", "post"][..],
+            &["domain"][..],
+            "",
+        ),
+    ] {
+        let parameters = ["storage", "path", "id", "input", "name", "username"]
+            .into_iter()
+            .filter(|name| path.contains(&format!("{{{name}}}")))
+            .map(|name| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}}))
+            .chain(query.iter().map(|name| {
+                json!({"name":name,"in":"query","required":path=="/alias/rule",
+                "schema":{"type":"string"}})
+            }))
+            .collect::<Vec<_>>();
+        for method in methods {
+            let mut operation = json!({
+                "tags":["Media and storage"],
+                "security":if path.starts_with("/widget") { json!([]) } else { json!([{"bearer":[]}]) },
+                "parameters":parameters,
+                "responses":{"200":{"description":"Legacy media response"},"400":error(),
+                    "401":error(),"403":error(),"404":error(),"503":error()}
+            });
+            if path.ends_with("/{path}") {
+                if matches!(*method, "get" | "head") {
+                    operation["responses"]["206"] = json!({"description":"Partial content"});
+                    operation["responses"]["304"] = json!({"description":"Not modified"});
+                    operation["responses"]["416"] = json!({"description":"Range not satisfiable"});
+                } else if *method == "put" {
+                    operation["responses"]["201"] = json!({"description":"Created"});
+                    operation["responses"]["204"] = json!({"description":"Replaced"});
+                    operation["responses"]["507"] = error();
+                }
+            }
+            if path.contains("/playout/") {
+                operation["description"] =
+                    json!("Requires the Restreamer FFmpeg control extension");
+                operation["responses"]["501"] = error();
+            }
+            if !body.is_empty() {
+                let content = if body == "binary" {
+                    json!({"application/octet-stream":{"schema":{"type":"string","format":"binary"}}})
+                } else {
+                    json!({"application/json":{"schema":{"$ref":format!("#/components/schemas/{body}")}}})
+                };
+                operation["requestBody"] = json!({"required":true,"content":content});
+            }
+            spec["paths"][format!("/api/v3{path}")][*method] = operation;
+        }
+    }
+    let schemas = &mut spec["components"]["schemas"];
+    schemas["Alias"] = json!({"type":"object","required":["pattern","target"],
+        "properties":{"pattern":{"type":"string"},"target":{"type":"string"}}});
+    schemas["Aliases"] = json!({"type":"array","items":{"$ref":"#/components/schemas/Alias"}});
+    schemas["ViewerTokens"] = json!({"type":"array","items":{"type":"object",
+        "properties":{"match":{"type":"string"},"remote":{"type":"array","items":{"type":"string"}},"ttl_sec":{"type":"integer"},"extra":{},
+                      "token":{"type":"string","readOnly":true}}}});
+    schemas["StorageOperation"] = json!({"type":"object","required":["source","target","operation"],
+        "properties":{"operation":{"enum":["copy","move"]},"source":{"type":"string"},
+                      "target":{"type":"string"},"bandwidth_limit_kbit":{"type":"integer","minimum":0}}});
 }
 
 fn error() -> Value {

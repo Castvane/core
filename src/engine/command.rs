@@ -13,6 +13,7 @@ type Key = (String, String);
 #[derive(Clone)]
 pub struct Options {
     pub ffmpeg: PathBuf,
+    media: crate::media::Endpoints,
     pub ffprobe: PathBuf,
     pub launcher: Option<PathBuf>,
     pub max_children: usize,
@@ -100,6 +101,7 @@ impl Options {
         }
         Ok(Self {
             ffmpeg,
+            media: Default::default(),
             ffprobe: probe,
             launcher: overrides.launcher.clone(),
             max_children: if ceiling == 0 { 32 } else { ceiling as usize },
@@ -117,6 +119,11 @@ impl Options {
             input: Policy::read(&ff["access"]["input"])?,
             output: Policy::read(&ff["access"]["output"])?,
         })
+    }
+
+    pub fn with_media(mut self, media: crate::media::Endpoints) -> Self {
+        self.media = media;
+        self
     }
 
     pub fn for_probe(&mut self) {
@@ -270,8 +277,23 @@ impl Options {
             });
         }
         for output in &config.outputs {
-            let opts = context.arguments(&output.options, Some((output, false)), strict)?;
+            let mut opts = context.arguments(&output.options, Some((output, false)), strict)?;
             let address = context.string(&output.address, Some((output, false)))?;
+            if let Ok(url) = url::Url::parse(&address)
+                && self
+                    .media
+                    .memory_auth
+                    .as_ref()
+                    .is_some_and(|(user, _)| url.username() == user)
+                && cleanup_location(self, &address).is_some_and(|(name, _)| name != "disk")
+            {
+                if !opts.iter().any(|value| value == "-auth_type") {
+                    opts.extend(["-auth_type".into(), "basic".into()]);
+                }
+                if !opts.iter().any(|value| value == "-send_expect_100") {
+                    opts.extend(["-send_expect_100".into(), "1".into()]);
+                }
+            }
             for target in destinations(&address)? {
                 evaluate_address(&self.output, target, false)?;
             }
@@ -547,6 +569,7 @@ impl Expansion<'_> {
     ) -> Result<String, Error> {
         let mut result = String::new();
         let mut rest = value;
+        let mut rtmp = false;
         while let Some((prefix, tail)) = rest.split_once('{') {
             result.push_str(prefix);
             let Some((name, remaining)) = tail.split_once('}') else {
@@ -570,7 +593,74 @@ impl Expansion<'_> {
                     }
                 }
                 "date" => result.push_str(&self.format_date("%Y-%m-%d_%H-%M-%S")?),
-                "memfs" | "fs:mem" | "rtmp" | "srt" | "hwdevice" => {
+                "memfs" | "fs:mem" => {
+                    let base = self
+                        .options
+                        .media
+                        .memory
+                        .as_ref()
+                        .ok_or(Error::Invalid("memory mount unavailable"))?;
+                    result.push_str(&self.storage_address(base)?);
+                }
+                name if name == "rtmp" || name.starts_with("rtmp,name=") => {
+                    let base = self
+                        .options
+                        .media
+                        .rtmp
+                        .as_deref()
+                        .ok_or(Error::Invalid("RTMP listener unavailable"))?;
+                    result.push_str(base.trim_end_matches('/'));
+                    if !self.config.domain.is_empty() {
+                        result.push('/');
+                        result.push_str(&self.config.domain);
+                    }
+                    if let Some(name) = name.strip_prefix("rtmp,name=") {
+                        super::super::media::storage::Key::parse(name)
+                            .map_err(|_| Error::Invalid("invalid RTMP stream name"))?;
+                        result.push('/');
+                        result.push_str(name.trim_start_matches('/'));
+                    }
+                    rtmp = true;
+                }
+                name if name == "srt" || name.starts_with("srt,name=") => {
+                    let (io, input) =
+                        endpoint.ok_or(Error::Invalid("SRT placeholder requires an endpoint"))?;
+                    let url = if input {
+                        &self.options.media.srt_read
+                    } else {
+                        &self.options.media.srt_write
+                    };
+                    let key = name
+                        .strip_prefix("srt,name=")
+                        .or_else(|| rest.strip_prefix('/'))
+                        .filter(|path| !path.is_empty())
+                        .unwrap_or(io.id.as_str());
+                    if key.contains([':', ',', '?', '#', '&', '=', '%']) {
+                        return Err(Error::Invalid("invalid SRT stream ID"));
+                    }
+                    let url = url
+                        .as_deref()
+                        .ok_or(Error::Invalid("SRT listener unavailable"))?;
+                    let key = if self.config.domain.is_empty() {
+                        key.to_owned()
+                    } else {
+                        format!("{}/{key}", self.config.domain)
+                    };
+                    result.push_str(&url.replace("COREMEDIAKEY", &key));
+                    if rest.starts_with('/') {
+                        rest = "";
+                    }
+                }
+                value if value.starts_with("fs:") => {
+                    let base = self
+                        .options
+                        .media
+                        .remote_storage
+                        .get(&value[3..])
+                        .ok_or(Error::Invalid("unknown object storage mount"))?;
+                    result.push_str(&self.storage_address(base)?);
+                }
+                "hwdevice" => {
                     return Err(Error::Invalid(
                         "placeholder requires an unavailable Core integration",
                     ));
@@ -604,7 +694,28 @@ impl Expansion<'_> {
             }
         }
         result.push_str(rest);
+        if rtmp && !self.options.media.rtmp_token.is_empty() {
+            self.secrets.push(self.options.media.rtmp_token.clone());
+            let mut url =
+                url::Url::parse(&result).map_err(|_| Error::Invalid("invalid RTMP address"))?;
+            url.query_pairs_mut()
+                .append_pair("token", &self.options.media.rtmp_token);
+            result = url.into();
+        }
         Ok(result)
+    }
+
+    fn storage_address(&mut self, base: &str) -> Result<String, Error> {
+        let mut url =
+            url::Url::parse(base).map_err(|_| Error::Invalid("storage mount unavailable"))?;
+        if let Some((user, password)) = &self.options.media.memory_auth {
+            url.set_username(user)
+                .map_err(|_| Error::Invalid("invalid storage user"))?;
+            url.set_password(Some(password))
+                .map_err(|_| Error::Invalid("invalid storage credential"))?;
+            self.secrets.push(password.clone());
+        }
+        Ok(url.as_str().trim_end_matches('/').to_owned())
     }
 
     fn format_date(&self, format: &str) -> Result<String, Error> {
@@ -770,7 +881,9 @@ fn policy_option(flag: &str) -> bool {
     )
 }
 
-pub async fn clean_outputs(options: &Options, config: &Config, purge: bool) {
+/// Clean only files selected by a process rule and preserve paths claimed by
+/// other configured processes. Mounted files use the same storage boundary as HTTP.
+pub async fn clean_outputs(options: &Options, config: &Config, purge: bool, graph: &super::Graph) {
     if !config
         .outputs
         .iter()
@@ -778,86 +891,140 @@ pub async fn clean_outputs(options: &Options, config: &Config, purge: bool) {
     {
         return;
     }
-    let Some(root) = tokio::fs::canonicalize(&options.disk).await.ok() else {
-        return;
-    };
+    let graph = graph.read().await;
     let mut secrets = Vec::new();
-    let mut expansion = Expansion {
-        options,
-        config,
-        now: jiff::Timestamp::now(),
-        secrets: &mut secrets,
-    };
-    for output in &config.outputs {
-        for rule in &output.cleanup {
-            if purge && !rule.purge_on_delete {
-                continue;
-            }
-            if !purge && rule.max_files == 0 && rule.max_file_age_seconds == 0 {
-                continue;
-            }
-            let Ok(pattern) = expansion.string(&rule.pattern, Some((output, false))) else {
-                continue;
+    let now = jiff::Timestamp::now();
+    let mut protected = Vec::new();
+    for other in graph.values().map(|job| &job.config) {
+        if other.id == config.id && other.domain == config.domain {
+            continue;
+        }
+        for output in &other.outputs {
+            let mut expanded = Expansion {
+                options,
+                config: other,
+                now,
+                secrets: &mut secrets,
             };
-            let pattern = Path::new(&pattern);
-            let Some(name) = pattern.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            let Ok(pattern_name) = glob::Pattern::new(name) else {
-                continue;
-            };
-            let Some(parent) = pattern.parent() else {
-                continue;
-            };
-            let parent = if parent.is_absolute() || parent.starts_with(Path::new(&options.disk)) {
-                parent.to_owned()
-            } else {
-                root.join(parent)
-            };
-            let Ok(parent) = tokio::fs::canonicalize(parent).await else {
-                continue;
-            };
-            if !parent.starts_with(&root) {
-                continue;
-            }
-            let Ok(mut entries) = tokio::fs::read_dir(&parent).await else {
-                continue;
-            };
-            let mut files = Vec::new();
-            for _ in 0..4096 {
-                let Ok(Some(entry)) = entries.next_entry().await else {
-                    break;
-                };
-                if !entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| pattern_name.matches(name))
+            for value in std::iter::once(&output.address)
+                .chain(output.cleanup.iter().map(|rule| &rule.pattern))
+            {
+                let value = DATE_PLACEHOLDER.replace_all(value, "*");
+                if let Ok(value) = expanded.string(&value, Some((output, false)))
+                    && let Some((mount, name)) = cleanup_location(options, &value)
                 {
-                    continue;
-                }
-                if !entry.file_type().await.is_ok_and(|kind| kind.is_file()) {
-                    continue;
-                }
-                if let Ok(modified) = entry
-                    .metadata()
-                    .await
-                    .and_then(|metadata| metadata.modified())
-                {
-                    files.push((modified, entry.path()));
-                }
-            }
-            files.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.0));
-            for (index, (modified, path)) in files.into_iter().enumerate() {
-                let old = rule.max_file_age_seconds > 0
-                    && modified
-                        .elapsed()
-                        .is_ok_and(|age| age.as_secs() >= rule.max_file_age_seconds);
-                if purge || old || (rule.max_files > 0 && index as u64 >= rule.max_files) {
-                    let _ = tokio::fs::remove_file(path).await;
+                    let name = FF_SEGMENT.replace_all(&name, "*");
+                    if let Ok(pattern) = glob::Pattern::new(&name) {
+                        protected.push((mount, pattern));
+                    }
                 }
             }
         }
     }
+    let mut expansion = Expansion {
+        options,
+        config,
+        now,
+        secrets: &mut secrets,
+    };
+    for output in &config.outputs {
+        for rule in &output.cleanup {
+            if (purge && !rule.purge_on_delete)
+                || (!purge && rule.max_files == 0 && rule.max_file_age_seconds == 0)
+            {
+                continue;
+            }
+            let Ok(value) = expansion.string(&rule.pattern, Some((output, false))) else {
+                continue;
+            };
+            let Some((mount, name)) = cleanup_location(options, &value) else {
+                continue;
+            };
+            let Ok(pattern) = glob::Pattern::new(&name) else {
+                continue;
+            };
+            let Some(backend) = options.media.cleanup_mounts.get(&mount) else {
+                continue;
+            };
+            let Ok(mut files) = backend.list().await else {
+                continue;
+            };
+            let matching = glob::MatchOptions {
+                require_literal_separator: true,
+                ..Default::default()
+            };
+            files.retain(|item| {
+                pattern.matches_with(item.key.as_str(), matching)
+                    && !protected.iter().any(|(name, pattern)| {
+                        name == &mount && pattern.matches_with(item.key.as_str(), matching)
+                    })
+            });
+            files.sort_unstable_by_key(|item| std::cmp::Reverse(item.modified));
+            for (index, item) in files.into_iter().enumerate() {
+                let old = rule.max_file_age_seconds > 0
+                    && item
+                        .modified
+                        .elapsed()
+                        .is_ok_and(|age| age.as_secs() >= rule.max_file_age_seconds);
+                if (purge || old || (rule.max_files > 0 && index as u64 >= rule.max_files))
+                    && backend
+                        .stat(&item.key)
+                        .await
+                        .is_ok_and(|current| current.tag == item.tag)
+                {
+                    let _ = backend.delete(&item.key).await;
+                }
+            }
+        }
+    }
+}
+
+static FF_SEGMENT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"%(?:0?\d+)?d|\$Number\$|\$Time\$").expect("fixed segment pattern")
+});
+static DATE_PLACEHOLDER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"\{date(?:,[^}]*)?\}").expect("fixed date pattern")
+});
+
+fn cleanup_location(options: &Options, value: &str) -> Option<(String, String)> {
+    if let Ok(url) = url::Url::parse(value) {
+        if url.scheme() == "file" {
+            let path = url.to_file_path().ok()?;
+            return cleanup_location(options, path.to_str()?);
+        }
+        for (name, base) in options.media.memory.iter().map(|base| ("mem", base)).chain(
+            options
+                .media
+                .remote_storage
+                .iter()
+                .map(|(name, base)| (name.as_str(), base)),
+        ) {
+            let base = url::Url::parse(base).ok()?;
+            if url.origin() != base.origin() {
+                continue;
+            }
+            if let Some(path) = url
+                .path()
+                .strip_prefix(base.path())
+                .and_then(|path| path.strip_prefix('/'))
+            {
+                let path = percent_encoding::percent_decode_str(path)
+                    .decode_utf8()
+                    .ok()?;
+                crate::media::storage::Key::parse(&path).ok()?;
+                return Some((name.to_owned(), path.into_owned()));
+            }
+        }
+        return None;
+    }
+    let path = Path::new(value);
+    let path = path.strip_prefix(Path::new(&options.disk)).unwrap_or(path);
+    if path.is_absolute() {
+        return None;
+    }
+    let path = path.to_str()?;
+    crate::media::storage::Key::parse(path).ok()?;
+    Some(("disk".into(), path.into()))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{ffi::OsString, net::SocketAddr, os::unix::process::CommandExt, sync::Arc};
+use std::{ffi::OsString, os::unix::process::CommandExt, sync::Arc};
 
 use axum::serve::{Listener, ListenerExt};
 use restreamer_core::{App, StartupError, config::Environment};
@@ -64,6 +64,7 @@ async fn serve() -> Result<(), StartupError> {
         });
     }
     let listener = app.bind().await?;
+    let tls = app.bind_tls().await?;
     let app = Arc::new(app);
     tracing::info!(address = %listener.local_addr()?, "restreamer core listening");
 
@@ -75,18 +76,41 @@ async fn serve() -> Result<(), StartupError> {
     #[cfg(not(unix))]
     let shutdown = shutdown();
 
-    let result = axum::serve(
+    let signals = app.clone();
+    let drain = tokio_util::sync::CancellationToken::new();
+    let trigger = drain.clone();
+    let signals_task = tokio::spawn(async move {
+        shutdown.await;
+        signals.stop_media_delivery();
+        trigger.cancel();
+    });
+    let tls_task = if let Some(tls) = tls {
+        tracing::info!(address=%tls.local_addr()?.0,"restreamer core HTTPS listening");
+        let tls_drain = drain.clone();
+        let routes = restreamer_core::router(app.clone());
+        Some(tokio::spawn(restreamer_core::serve_http(
+            tls, routes, tls_drain,
+        )))
+    } else {
+        None
+    };
+    restreamer_core::serve_http(
         listener.tap_io(|stream| {
             if stream.set_nodelay(true).is_err() {
                 tracing::debug!("could not set TCP_NODELAY");
             }
         }),
-        restreamer_core::router(app.clone()).into_make_service_with_connect_info::<SocketAddr>(),
+        restreamer_core::router(app.clone()),
+        drain.clone(),
     )
-    .with_graceful_shutdown(shutdown)
     .await;
+    drain.cancel();
+    signals_task.abort();
+    if let Some(task) = tls_task {
+        task.await?;
+    }
     app.close().await;
-    Ok(result?)
+    Ok(())
 }
 
 #[cfg(unix)]

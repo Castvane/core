@@ -54,6 +54,8 @@ The standalone operations layer uses SQLite for managed identities, policy assig
 
 Provide standalone and clustered modes, with stable node identity, enrollment/authentication, heartbeat and resource inventory. Replicate durable desired state with a reviewed consensus library; distinguish quorum decisions from ephemeral telemetry. Implement reconciliation, reservations, affinity, zones, relocation, rebalancing, failover and distributed locks/leases with fencing. Test partitions, leader elections, duplicate commands, node removal, recovery, snapshots and rolling upgrades. Expose v3 cluster APIs; decide mixed Go/Rust cluster support separately. Prevent conflicting process ownership when quorum is unavailable.
 
+The opt-in Raft implementation and remaining exit criteria appear in [Phase 5 status](docs/PHASE_5_STATUS.md). See [cluster installation](docs/CLUSTER.md) for supported node roles and ownership assumptions.
+
 ### 6 — Release and maintenance
 
 Finish endpoint/feature coverage, GraphQL operations and legacy UI tests. Add documented migrations and safe rollback for applicable existing configurations, native binaries and Docker images for supported architectures, health/readiness, observability, dependency/license audit, release SBOM, soak/load tests and disaster recovery drills. The [candidate build and recovery workflow](docs/DEPLOYMENT.md) can generate unsigned native and container artifacts. Production publication, Go migration, GraphQL and the release acceptance gates remain open.

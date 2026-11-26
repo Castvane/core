@@ -38,6 +38,7 @@ pub async fn document() -> Json<Value> {
     process_paths(&mut spec);
     media_paths(&mut spec);
     operations_paths(&mut spec);
+    cluster_paths(&mut spec);
     Json(spec)
 }
 
@@ -519,6 +520,58 @@ fn operations_paths(spec: &mut Value) {
         "metrics":{"type":"array","maxItems":128,"items":{"type":"object","required":["name"],
             "properties":{"name":{"type":"string"},"labels":{"type":"object","additionalProperties":{"type":"string"}}}}}
     }});
+}
+
+fn cluster_paths(spec: &mut Value) {
+    for (suffix, methods) in [
+        ("", &["get"][..]),
+        ("/healthy", &["get"][..]),
+        ("/snapshot", &["get"][..]),
+        ("/node", &["get"][..]),
+        ("/node/{id}", &["get", "post"][..]),
+        ("/node/{id}/state", &["get", "put"][..]),
+        ("/node/{id}/fs/{storage}", &["get"][..]),
+        (
+            "/node/{id}/fs/{storage}/{path}",
+            &["get", "head", "put", "delete"][..],
+        ),
+        ("/membership", &["put"][..]),
+        ("/deployments", &["get"][..]),
+        ("/reallocation", &["put"][..]),
+        ("/process", &["get", "post"][..]),
+        ("/process/{id}", &["get", "put", "delete"][..]),
+        ("/process/{id}/config", &["get"][..]),
+        ("/process/{id}/command", &["put"][..]),
+        ("/process/{id}/state", &["get"][..]),
+        ("/process/{id}/metadata", &["get"][..]),
+        ("/process/{id}/metadata/{key}", &["get", "put"][..]),
+        ("/db/kv", &["get"][..]),
+        ("/db/kv/{key}", &["get", "put", "delete"][..]),
+        ("/db/locks", &["get"][..]),
+        ("/db/locks/{key}", &["put", "delete"][..]),
+        ("/iam/user", &["get", "post"][..]),
+        ("/iam/user/{name}", &["get", "put", "delete"][..]),
+        ("/iam/user/{name}/policy", &["put"][..]),
+        ("/iam/policies", &["get"][..]),
+        ("/zone", &["get", "post"][..]),
+        ("/zone/{id}", &["get", "put", "delete"][..]),
+        ("/alias", &["get", "post", "put"][..]),
+        ("/alias/rule", &["get", "put", "delete"][..]),
+    ] {
+        let parameters: Vec<_> = ["id", "key", "name", "storage", "path"]
+            .into_iter()
+            .filter(|name| suffix.contains(&format!("{{{name}}}")))
+            .map(|name| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}}))
+            .collect();
+        for method in methods {
+            spec["paths"][format!("/api/v3/cluster{suffix}")][*method] = json!({
+                "tags":["Cluster"],"security":[{"bearer":[]}],"parameters":parameters,
+                "description":"Administrator operations on an enabled Castvane cluster",
+                "responses":{"200":{"description":"Success"},"400":error(),"401":error(),"403":error(),
+                    "404":error(),"409":error(),"503":error()}
+            });
+        }
+    }
 }
 
 fn error() -> Value {

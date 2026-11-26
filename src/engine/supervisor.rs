@@ -31,6 +31,7 @@ pub struct Supervisor {
     pub slots: Arc<Semaphore>,
     pub budget: Arc<super::Budget>,
     pub events: broadcast::Sender<Event>,
+    pub gate: Option<Arc<crate::cluster::work::Gate>>,
 }
 
 impl Supervisor {
@@ -284,6 +285,13 @@ impl Supervisor {
             runtime.usage = Default::default();
             runtime.launched = Some(now);
         }
+        if self
+            .gate
+            .as_ref()
+            .is_some_and(|gate| !gate.allows(&job.config))
+        {
+            return Exit::failed("cluster ownership lease expired");
+        }
         let Ok((mut child, group)) =
             launch(&options.ffmpeg, &command.args, options.launcher.as_deref())
         else {
@@ -362,10 +370,13 @@ impl Supervisor {
                 biased;
                 _ = wake(updates, &mut self.shutdown) => {
                     let reason = if *self.shutdown.borrow() { "application shutdown".into() } else { updates.borrow().reason.clone() };
-                    break terminate(state, &mut child, &group, options.stop_timeout, reason, true).await;
+                    break terminate(state, &mut child, &group, if self.gate.is_some() { 1 } else { options.stop_timeout }, reason, true).await;
                 }
                 status = child.wait() => break Exit::natural(status),
                 _ = sample.tick() => {
+                    if self.gate.as_ref().is_some_and(|gate| !gate.allows(config)) {
+                        break terminate(state, &mut child, &group, 1, "cluster ownership lease expired".into(), true).await;
+                    }
                     cleanup_ticks += 1;
                     if cleanup_ticks >= 30 && let Some(graph) = self.graph.upgrade() {
                         cleanup_ticks = 0;

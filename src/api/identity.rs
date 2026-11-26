@@ -59,7 +59,12 @@ fn parse<T>(value: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
         .map_err(|_| ApiError::bad_request("invalid JSON"))
 }
 
-fn scrubbed(name: &str, account: Option<&Account>, rules: Vec<Rule>, bootstrap: bool) -> Value {
+pub(super) fn scrubbed(
+    name: &str,
+    account: Option<&Account>,
+    rules: Vec<Rule>,
+    bootstrap: bool,
+) -> Value {
     json!({
         "name":name, "alias": account.map_or("", |row| row.alias.as_str()),
         "created_at":account.map_or(0, |row| row.created_at), "updated_at":account.map_or(0, |row| row.updated_at),

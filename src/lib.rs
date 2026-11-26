@@ -3,6 +3,7 @@
 mod api;
 mod auth;
 mod certificates;
+mod cluster;
 pub mod config;
 mod engine;
 mod http_server;

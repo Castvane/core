@@ -142,6 +142,7 @@ pub struct Engine {
     live: Arc<LiveOutputs>,
     mutations: tokio::sync::Mutex<()>,
     queued_mutations: Arc<Semaphore>,
+    gate: Option<Arc<crate::cluster::work::Gate>>,
     options: watch::Sender<Arc<Options>>,
     shutdown: watch::Sender<bool>,
     slots: Arc<Semaphore>,
@@ -161,6 +162,7 @@ impl Engine {
         pool: SqlitePool,
         options: Options,
         budget: Arc<Budget>,
+        gate: Option<Arc<crate::cluster::work::Gate>>,
     ) -> Result<Arc<Self>, Error> {
         let repository = Repository(pool);
         let jobs = repository.all().await?;
@@ -186,6 +188,7 @@ impl Engine {
         });
         let engine = Arc::new(Self {
             repository,
+            gate,
             index: RwLock::new(BTreeMap::new()),
             graph: Arc::new(RwLock::new(BTreeMap::new())),
             live: Arc::new(Mutex::new(BTreeMap::new())),
@@ -242,6 +245,7 @@ impl Engine {
             slots: self.slots.clone(),
             budget: self.budget.clone(),
             events: self.events.clone(),
+            gate: self.gate.clone(),
         };
         *lock(&entry.task) = Some(worker.spawn(&entry, receiver));
         entry
@@ -512,6 +516,16 @@ impl Engine {
         })
         .await
         .map_err(|_| Error::Internal)?
+    }
+
+    pub(crate) async fn cluster_zone(
+        &self,
+        id: &str,
+        limits: &serde_json::Value,
+    ) -> Result<(), Error> {
+        sqlx::query("INSERT INTO zone(id,document) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document")
+            .bind(id).bind(limits.to_string()).execute(&self.repository.0).await?;
+        Ok(())
     }
 
     pub async fn validate(&self, config: &Config) -> Result<(), Error> {

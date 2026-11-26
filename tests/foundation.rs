@@ -391,7 +391,7 @@ async fn startup_migrates_existing_data_and_database_contains_no_plain_password(
             .fetch_one(&pool)
             .await
             .unwrap(),
-        4
+        5
     );
     pool.close().await;
     let migrated = Instance::open(&dir, &[]).await;

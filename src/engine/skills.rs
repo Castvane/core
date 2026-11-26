@@ -17,6 +17,15 @@ pub struct Inventory {
     pub ffprobe_version: Option<String>,
 }
 
+impl Inventory {
+    pub(crate) fn has_video_encoder(&self, name: &str) -> bool {
+        self.codecs
+            .video
+            .iter()
+            .any(|codec| codec.encoders.iter().any(|encoder| encoder == name))
+    }
+}
+
 #[derive(Clone, Default, Serialize)]
 pub struct Version {
     pub version: String,

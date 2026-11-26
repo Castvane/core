@@ -21,6 +21,7 @@ pub struct Aliases {
     store: SqlitePool,
     rules: tokio::sync::RwLock<Arc<Vec<Compiled>>>,
     writes: tokio::sync::Mutex<()>,
+    cluster: tokio::sync::RwLock<Option<Arc<Vec<Compiled>>>>,
 }
 
 impl Aliases {
@@ -39,6 +40,7 @@ impl Aliases {
             store,
             rules: tokio::sync::RwLock::new(Arc::new(rules)),
             writes: Default::default(),
+            cluster: Default::default(),
         })
     }
 
@@ -78,8 +80,22 @@ impl Aliases {
         Ok(result)
     }
 
+    pub(crate) fn validate_rules(rules: Vec<Rule>) -> Result<(), Error> {
+        compile(rules).map(|_| ())
+    }
+
+    pub(crate) async fn cluster_rules(&self, rules: Vec<Rule>) -> Result<(), Error> {
+        let rules = Arc::new(compile(rules)?);
+        *self.cluster.write().await = Some(rules);
+        Ok(())
+    }
+
     pub async fn resolve(&self, url: &str) -> Result<String, Error> {
-        let rules = self.rules.read().await.clone();
+        let cluster = self.cluster.read().await.clone();
+        let rules = match cluster {
+            Some(rules) => rules,
+            None => self.rules.read().await.clone(),
+        };
         let mut path = url.to_owned();
         let mut used = std::collections::HashSet::new();
         for _ in 0..8 {

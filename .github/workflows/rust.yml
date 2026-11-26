@@ -28,4 +28,5 @@ jobs:
       - run: cargo build --locked --release
       - run: bash scripts/test-acme.sh target/release/restreamer-core
       - run: bash scripts/smoke-test.sh target/release/restreamer-core
+      - run: python3 scripts/test-cluster.py target/release/restreamer-core
       - run: python3 scripts/test-recovery.py target/release/restreamer-core --seconds 5

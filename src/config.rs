@@ -92,6 +92,7 @@ struct AuthTenant {
 pub struct Environment {
     pub(crate) engine: crate::engine::Overrides,
     pub db: PathBuf,
+    pub(crate) cluster_file: Option<PathBuf>,
     pub password: Option<Zeroizing<String>>,
     pub signing_key: Option<Zeroizing<String>>,
     pub allow_insecure: bool,
@@ -469,6 +470,7 @@ impl Environment {
             password_override: password.is_some(),
             signing_key_override: signing_key.is_some(),
             db,
+            cluster_file: get("CORE_CLUSTER_CONFIG").map(PathBuf::from),
             password,
             signing_key,
             allow_insecure,

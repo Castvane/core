@@ -47,6 +47,7 @@ impl Store {
                 SqliteConnectOptions::new()
                     .filename(path)
                     .journal_mode(SqliteJournalMode::Wal)
+                    .synchronous(sqlx::sqlite::SqliteSynchronous::Full)
                     .busy_timeout(Duration::from_secs(5))
                     .foreign_keys(true)
                     .pragma("trusted_schema", "OFF")

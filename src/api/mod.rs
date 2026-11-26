@@ -1,12 +1,13 @@
+mod cluster;
 mod dto;
 mod error;
 mod identity;
-mod media;
-mod media_http;
+pub(crate) mod media;
+pub(crate) mod media_http;
 mod openapi;
 mod operations;
 mod process;
-mod process_dto;
+pub(crate) mod process_dto;
 mod zones;
 
 use std::{
@@ -36,13 +37,14 @@ use crate::{
     persistence::{Record, Store},
     state::{take_secret, validate, validate_password},
 };
-use error::ApiError;
+pub(crate) use error::ApiError;
 
 pub fn router(app: Arc<App>) -> Router {
     let management = Router::new()
         .route("/config", get(get_config).put(set_config))
         .route("/config/reload", get(reload_config))
         .merge(process::routes())
+        .merge(cluster::routes())
         .merge(identity::routes())
         .merge(zones::routes())
         .merge(operations::routes())
@@ -271,11 +273,17 @@ async fn identify(
                 Err(invalid_token())
             };
         }
-        let account = app
-            .iam
-            .principal(&subject)
-            .await?
-            .ok_or_else(invalid_token)?;
+        let account = if let Some(cluster) = &app.cluster {
+            match cluster.identity(&subject).await? {
+                Some(identity) => {
+                    crate::iam::Principal::from_account(identity.account, identity.rules)?
+                }
+                None => None,
+            }
+        } else {
+            app.iam.principal(&subject).await?
+        }
+        .ok_or_else(invalid_token)?;
         if account.generation != generation {
             return Err(invalid_token());
         }
@@ -283,8 +291,9 @@ async fn identify(
     }
     if purpose == TokenUse::Access {
         let loopback = peer.is_some_and(|ip| ip.is_loopback());
-        if (!settings.api.auth.enable && (loopback || app.environment.allow_insecure))
-            || (loopback && settings.api.auth.disable_localhost)
+        if app.cluster.is_none()
+            && ((!settings.api.auth.enable && (loopback || app.environment.allow_insecure))
+                || (loopback && settings.api.auth.disable_localhost))
         {
             return Ok(Identity::TrustedLocalClient);
         }
@@ -348,6 +357,23 @@ async fn authorize(
         && !managed_route(&identity, path, request.uri(), request.method(), write)
     {
         return Err(ApiError::forbidden("access denied"));
+    }
+    if app.cluster.is_some()
+        && write
+        && (path == "/api/v3/process" || path.starts_with("/api/v3/process/"))
+        && path != "/api/v3/process/probe"
+        && path != "/api/v3/process/validate"
+    {
+        return Err(ApiError::Http(
+            StatusCode::CONFLICT,
+            "use the cluster process API to change desired state",
+        ));
+    }
+    if app.cluster.is_some() && write && path.starts_with("/api/v3/iam/user") {
+        return Err(ApiError::Http(
+            StatusCode::CONFLICT,
+            "use the cluster IAM API for managed identities",
+        ));
     }
     if write && settings.api.read_only {
         return Err(if reload || process_route {
@@ -511,7 +537,7 @@ async fn discovery(
             process_engine: true,
             local_login: !auths.is_empty(),
             media: true,
-            clustering: false,
+            clustering: app.cluster.is_some(),
         },
     }))
 }
@@ -538,6 +564,13 @@ async fn login(
     }
     let account = if username == settings.api.auth.username {
         record.password_hash.zip(record.generation)
+    } else if let Some(cluster) = &app.cluster {
+        cluster
+            .identity(&username)
+            .await?
+            .map(|identity| identity.account)
+            .filter(|account| account.active)
+            .map(|account| (account.password_hash, account.generation))
     } else {
         app.iam
             .get(&username)

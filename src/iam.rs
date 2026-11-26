@@ -76,6 +76,26 @@ pub struct Principal {
 }
 
 impl Principal {
+    pub fn from_account(account: Account, rules: Vec<Rule>) -> Result<Option<Self>, sqlx::Error> {
+        if !account.active {
+            return Ok(None);
+        }
+        let rules = rules
+            .into_iter()
+            .map(|rule| {
+                let pattern = Pattern::new(&rule.resource)
+                    .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+                Ok((rule, pattern))
+            })
+            .collect::<Result<_, sqlx::Error>>()?;
+        Ok(Some(Self {
+            name: account.name,
+            administrator: account.administrator,
+            generation: account.generation,
+            rules: Arc::new(rules),
+        }))
+    }
+
     pub fn permits(&self, domain: &str, kind: &str, resource: &str, action: &str) -> bool {
         if self.administrator {
             return true;
@@ -103,7 +123,7 @@ impl Principal {
     }
 }
 
-#[derive(FromRow)]
+#[derive(FromRow, Deserialize, Serialize)]
 pub struct Account {
     pub name: String,
     pub alias: String,
@@ -144,20 +164,7 @@ impl Iam {
         };
         let rules = rules(&mut tx, name).await?;
         tx.commit().await?;
-        let rules = rules
-            .into_iter()
-            .map(|rule| {
-                let pattern = Pattern::new(&rule.resource)
-                    .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
-                Ok((rule, pattern))
-            })
-            .collect::<Result<_, sqlx::Error>>()?;
-        Ok(Some(Principal {
-            name: account.name,
-            administrator: account.administrator,
-            generation: account.generation,
-            rules: Arc::new(rules),
-        }))
+        Principal::from_account(account, rules)
     }
 
     pub async fn save(

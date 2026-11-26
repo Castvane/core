@@ -20,6 +20,8 @@ The media service supports disk, memory and S3 mounts, HTTP byte ranges, HLS and
 
 The operations layer adds managed identities, per-resource rules, zone reservations, bounded logs, audit events, health checks, TLS certificate replacement, and optional ACME HTTP-01. See [Phase 4 status](docs/PHASE_4_STATUS.md) for configuration and compatibility coverage.
 
+For opt-in multi-node operation, see [cluster installation](docs/CLUSTER.md) and [Phase 5 status](docs/PHASE_5_STATUS.md).
+
 See [Phase 1 status](docs/PHASE_1_STATUS.md) for authentication, configuration and manual UI testing. The [compatibility matrix](docs/API_COMPATIBILITY.md) describes the wire contract and UI initialization limits.
 
 Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap and compatibility contract. The Go reference remains on `vod` at commit `452e9429`.

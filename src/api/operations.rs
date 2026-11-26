@@ -154,12 +154,16 @@ async fn scrape(State(app): State<Arc<App>>, request: Request) -> Result<Respons
     if !user.allows("", "api", "/metrics", "read") {
         return Err(ApiError::forbidden("access denied"));
     }
+    let mut output = app.ops.prometheus();
+    if let Some(cluster) = &app.cluster {
+        output.push_str(&cluster.prometheus());
+    }
     Ok((
         [(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        app.ops.prometheus(),
+        output,
     )
         .into_response())
 }

@@ -146,7 +146,11 @@ async fn files(
     )))
 }
 
-async fn select(mount: &Mount, uri: &Uri, deleting: bool) -> Result<Vec<Meta>, ApiError> {
+pub(crate) async fn select(
+    mount: &Mount,
+    uri: &Uri,
+    deleting: bool,
+) -> Result<Vec<Meta>, ApiError> {
     let pattern = query_uri(uri, "glob").or_else(|| query_uri(uri, "pattern"));
     if deleting && pattern.as_ref().is_none_or(|v| v.is_empty()) {
         return Err(ApiError::bad_request("a glob pattern is required"));

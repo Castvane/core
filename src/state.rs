@@ -22,6 +22,8 @@ pub type StartupError = Box<dyn std::error::Error + Send + Sync>;
 
 pub struct App {
     pub(crate) store: Store,
+    pub(crate) cluster: Option<Arc<crate::cluster::Cluster>>,
+    worker: Option<(Store, tempfile::TempDir)>,
     pub(crate) auth: Authentication,
     pub(crate) iam: crate::iam::Iam,
     pub(crate) ops: Arc<crate::ops::Operations>,
@@ -192,17 +194,63 @@ impl App {
             .await?
         };
         let budget = crate::engine::Budget::from_host(&effective, &initial)?;
+        let settings_file = if effective["cluster"]["enable"] == true {
+            if !settings.api.auth.enable || settings.api.auth.disable_localhost {
+                return Err("cluster mode requires API authentication for all clients".into());
+            }
+            let file = environment
+                .cluster_file
+                .as_deref()
+                .ok_or("cluster mode requires CORE_CLUSTER_CONFIG")?;
+            Some(crate::cluster::Settings::read(file).await?)
+        } else {
+            None
+        };
+        let worker = if settings_file.is_some() {
+            let parent = tokio::fs::canonicalize(&environment.db).await?;
+            let directory = tempfile::Builder::new()
+                .prefix("cluster-worker-")
+                .tempdir_in(
+                    parent
+                        .parent()
+                        .ok_or("database must have a parent directory")?,
+                )?;
+            let store = Store::open(&directory.path().join("worker.sqlite")).await?;
+            Some((store, directory))
+        } else {
+            None
+        };
+        let gate = settings_file
+            .as_ref()
+            .map(|_| Arc::new(crate::cluster::work::Gate::default()));
         let processes = Engine::open(
-            store.0.clone(),
+            worker
+                .as_ref()
+                .map_or_else(|| store.0.clone(), |(store, _)| store.0.clone()),
             Options::from_document(&effective, &environment.engine)?
                 .with_media(media.endpoints(listening, false)),
             budget,
+            gate.clone(),
         )
         .await?;
         let ops = crate::ops::Operations::new(&effective, initial);
+        let cluster = if let Some(settings) = settings_file {
+            let media_root = tokio::fs::canonicalize(root_path).await?;
+            let cluster =
+                crate::cluster::Cluster::start(settings, &store, &media_root, media.clone())
+                    .await?;
+            if let Some(gate) = gate {
+                cluster.run_workers(processes.clone(), ops.clone(), media.clone(), gate);
+            }
+            Some(cluster)
+        } else {
+            None
+        };
         ops.start(&processes, &media, disk);
         ops.emit("application", "ready", "", "");
         Ok(Self {
+            cluster,
+            worker,
             ops,
             certificates: crate::certificates::Certificates::new(),
             iam: crate::iam::Iam(store.0.clone()),
@@ -325,6 +373,11 @@ impl App {
             return Err("authentication is required for the external HTTPS listener".into());
         }
         let acme = crate::certificates::Acme::parse(&doc, &self.environment.db)?;
+        if self.cluster.is_some() && acme.is_some() {
+            return Err(
+                "cluster mode requires externally coordinated public TLS certificates".into(),
+            );
+        }
         if let Some(acme) = &acme {
             let root = doc["storage"]["disk"]["dir"]
                 .as_str()
@@ -343,8 +396,14 @@ impl App {
 
     pub async fn close(&self) {
         self.ops.stop.cancel();
+        if let Some(cluster) = &self.cluster {
+            cluster.close().await;
+        }
         self.processes.close().await;
         self.media.close().await;
+        if let Some((worker, _)) = &self.worker {
+            worker.close().await;
+        }
         self.store.close().await;
     }
 }

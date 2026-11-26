@@ -189,6 +189,7 @@ impl Transport {
             .timeout(Duration::from_secs(3))
             .build()
             .map_err(|_| Error::Unavailable)?;
+        let working_directory = std::env::current_dir()?;
         let mut config = json!({
             "logLevel":"error","logDestinations":["stdout"],"api":true,"apiAddress":api.to_string(),
             "authMethod":"http","authHTTPAddress":format!("http://{}/{secret}",callback.local_addr()?),
@@ -210,8 +211,13 @@ impl Transport {
             } else {
                 "strict"
             });
-            config["rtmpServerCert"] = doc["tls"]["cert_file"].clone();
-            config["rtmpServerKey"] = doc["tls"]["key_file"].clone();
+            for (field, option) in [
+                ("cert_file", "rtmpServerCert"),
+                ("key_file", "rtmpServerKey"),
+            ] {
+                let file = doc["tls"][field].as_str().ok_or(Error::Invalid)?;
+                config[option] = json!(working_directory.join(file));
+            }
         }
         if let Some(address) = srt {
             config["srtAddress"] = json!(address.to_string());
@@ -221,11 +227,21 @@ impl Transport {
             .tempdir()?;
         let path = dir.path().join("mediamtx.json");
         tokio::fs::write(&path, config.to_string()).await?;
-        let program = doc["rtmp"]["transport_binary"]
-            .as_str()
-            .unwrap_or("mediamtx");
-        let mut command =
-            tokio::process::Command::new(launcher.unwrap_or_else(|| Path::new(program)));
+        let program = Path::new(
+            doc["rtmp"]["transport_binary"]
+                .as_str()
+                .unwrap_or("mediamtx"),
+        );
+        let program = if program
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty())
+        {
+            working_directory.join(program)
+        } else {
+            program.to_owned()
+        };
+        let launcher = launcher.map(|path| working_directory.join(path));
+        let mut command = tokio::process::Command::new(launcher.as_deref().unwrap_or(&program));
         if launcher.is_some() {
             command
                 .arg("__media_child")
@@ -234,6 +250,7 @@ impl Transport {
         }
         command
             .arg(path)
+            .current_dir(dir.path())
             .env_clear()
             .env("PATH", "/usr/local/bin:/usr/bin:/bin")
             .stdin(Stdio::null())

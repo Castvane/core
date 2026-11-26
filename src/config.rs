@@ -30,6 +30,8 @@ pub struct ApiSettings {
 
 #[derive(Deserialize)]
 pub struct AccessSettings {
+    #[serde(default)]
+    pub trusted_proxies: Vec<ipnet::IpNet>,
     pub http: NetworkPolicy,
     pub https: NetworkPolicy,
 }
@@ -45,6 +47,13 @@ pub struct AuthSettings {
     pub enable: bool,
     pub disable_localhost: bool,
     pub username: String,
+    pub jwt: JwtSettings,
+}
+
+#[derive(Deserialize)]
+pub struct JwtSettings {
+    pub access_ttl_sec: i64,
+    pub refresh_ttl_sec: i64,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -60,6 +69,7 @@ struct StorageBucket {
     region: String,
     use_ssl: bool,
     virtual_hosted_style: bool,
+    required: bool,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -161,7 +171,12 @@ impl Environment {
             ("srt.passphrase", &["CORE_SRT_PASSPHRASE"][..]),
             ("srt.token", &["CORE_SRT_TOKEN"][..]),
             ("tls.trust_file", &["CORE_TLS_TRUST_FILE"][..]),
+            ("log.format", &["CORE_LOG_FORMAT"][..]),
             ("tls.address", &["CORE_TLS_ADDRESS"][..]),
+            ("tls.email", &["CORE_TLS_EMAIL"][..]),
+            ("tls.acme_directory", &["CORE_TLS_ACME_DIRECTORY"][..]),
+            ("tls.acme_storage", &["CORE_TLS_ACME_STORAGE"][..]),
+            ("tls.acme_ca_file", &["CORE_TLS_ACME_CA_FILE"][..]),
             (
                 "tls.cert_file",
                 &["CORE_TLS_CERT_FILE", "CORE_TLS_CERTFILE"][..],
@@ -195,6 +210,7 @@ impl Environment {
             ),
             ("api.auth.auth0.enable", "CORE_API_AUTH_AUTH0_ENABLE"),
             ("rtmp.enable", "CORE_RTMP_ENABLE"),
+            ("rtmp.required", "CORE_RTMP_REQUIRED"),
             ("rtmp.enable_tls", "CORE_RTMP_ENABLE_TLS"),
             ("rtmp.httpflv.enable", "CORE_RTMP_HTTPFLV_ENABLE"),
             (
@@ -209,9 +225,17 @@ impl Environment {
             ),
             ("sessions.enable", "CORE_SESSIONS_ENABLE"),
             ("srt.enable", "CORE_SRT_ENABLE"),
+            ("srt.required", "CORE_SRT_REQUIRED"),
             ("playout.enable", "CORE_PLAYOUT_ENABLE"),
             ("tls.enable", "CORE_TLS_ENABLE"),
+            ("tls.auto", "CORE_TLS_AUTO"),
+            ("tls.staging", "CORE_TLS_STAGING"),
+            ("tls.acme_agree", "CORE_TLS_ACME_AGREE"),
             ("metrics.enable", "CORE_METRICS_ENABLE"),
+            (
+                "metrics.enable_prometheus",
+                "CORE_METRICS_ENABLE_PROMETHEUS",
+            ),
             ("cluster.enable", "CORE_CLUSTER_ENABLE"),
         ] {
             if let Some(value) = get(key) {
@@ -223,6 +247,10 @@ impl Environment {
         }
         for (path, key) in [
             ("host.name", "CORE_HOST_NAME"),
+            (
+                "api.access.trusted_proxies",
+                "CORE_API_ACCESS_TRUSTED_PROXIES",
+            ),
             ("log.topics", "CORE_LOG_TOPICS"),
             ("api.access.http.allow", "CORE_API_ACCESS_HTTP_ALLOW"),
             ("api.access.http.block", "CORE_API_ACCESS_HTTP_BLOCK"),
@@ -345,6 +373,21 @@ impl Environment {
                     "CORE_STORAGE_DISK_CACHE_TTLSECONDS",
                 ][..],
             ),
+            ("api.max_requests", &["CORE_API_MAX_REQUESTS"][..]),
+            ("api.max_connections", &["CORE_API_MAX_CONNECTIONS"][..]),
+            ("api.timeout_seconds", &["CORE_API_TIMEOUT_SECONDS"][..]),
+            (
+                "api.auth.jwt.access_ttl_sec",
+                &["CORE_API_AUTH_JWT_ACCESS_TTL_SEC"][..],
+            ),
+            (
+                "api.auth.jwt.refresh_ttl_sec",
+                &["CORE_API_AUTH_JWT_REFRESH_TTL_SEC"][..],
+            ),
+            (
+                "tls.acme_renew_before_seconds",
+                &["CORE_TLS_ACME_RENEW_BEFORE_SECONDS"][..],
+            ),
             (
                 "storage.upload_bitrate_kbit",
                 &["CORE_STORAGE_UPLOAD_BITRATE_KBIT"][..],
@@ -446,6 +489,10 @@ impl Environment {
     pub(crate) fn clear_secrets(&mut self) {
         self.password = None;
         self.signing_key = None;
+    }
+
+    pub(crate) fn signing_key_is_managed(&self) -> bool {
+        self.signing_key_override
     }
 
     pub(crate) fn password_is_managed(&self) -> bool {

@@ -9,8 +9,21 @@ use tower::ServiceExt;
 
 /// Serve HTTP with bounded connections and allow complete uploads from senders
 /// that close their write side without waiting for an HTTP response.
-pub async fn serve_http<L>(mut listener: L, router: Router, stop: CancellationToken)
+pub async fn serve_http<L>(listener: L, router: Router, stop: CancellationToken)
 where
+    L: Listener,
+    L::Addr: Clone + Send + Sync + 'static,
+{
+    serve_http_with_limits(listener, router, stop, 1024, None).await;
+}
+
+pub(crate) async fn serve_http_with_limits<L>(
+    mut listener: L,
+    router: Router,
+    stop: CancellationToken,
+    max_connections: usize,
+    ops: Option<std::sync::Arc<crate::ops::Operations>>,
+) where
     L: Listener,
     L::Addr: Clone + Send + Sync + 'static,
 {
@@ -20,10 +33,12 @@ where
             biased;
             _ = stop.cancelled() => break,
             _ = connections.join_next(), if !connections.is_empty() => {},
-            (io, peer) = listener.accept(), if connections.len() < 1024 => {
+            (io, peer) = listener.accept(), if connections.len() < max_connections.clamp(1, 8192) => {
                 let stop = stop.clone();
                 let router = router.clone();
+                let ops = ops.clone();
                 connections.spawn(async move {
+                    let _connection = ops.as_ref().map(|ops|ops.connection());
                     let service = service_fn(move |request: Request<Incoming>| {
                         let router = router.clone();
                         let mut request = request.map(Body::new);

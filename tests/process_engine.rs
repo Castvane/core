@@ -142,7 +142,7 @@ fn synthetic(id: &str) -> Value {
 }
 
 fn mock(path: &Path, script: &str) {
-    std::fs::write(path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::write(path, format!("#!/bin/sh\nif [ \"$1\" = -version ]; then echo 'ffmpeg version fixture'; exit 0; fi\n{script}\n")).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
@@ -786,10 +786,12 @@ async fn standalone_core_crash_terminates_the_media_leader() {
     let dir = TempDir::new().unwrap();
     let ffmpeg = dir.path().join("parent-death-ffmpeg");
     let marker = dir.path().join("child-pid");
-    mock(
-        &ffmpeg,
-        &format!("echo $$ > '{}'\nexec sleep 600", marker.display()),
-    );
+    let probe_marker = dir.path().join("health-child-pid");
+    std::fs::write(&ffmpeg, format!(
+        "#!/bin/sh\nif [ \"$1\" = -version ]; then echo $$ > '{}'; else echo $$ > '{}'; fi\nexec sleep 600\n",
+        probe_marker.display(), marker.display(),
+    )).unwrap();
+    std::fs::set_permissions(&ffmpeg, std::fs::Permissions::from_mode(0o700)).unwrap();
     let setup = Server::open(&dir, &[]).await;
     setup
         .expect(200, "POST", "/api/v3/process", Some(synthetic("crash")))
@@ -816,12 +818,15 @@ async fn standalone_core_crash_terminates_the_media_leader() {
         .stdout(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    let pid = tokio::time::timeout(Duration::from_secs(6), async {
+    let (pid, probe) = tokio::time::timeout(Duration::from_secs(8), async {
         loop {
-            if let Ok(file) = tokio::fs::read_to_string(&marker).await
-                && let Ok(pid) = file.trim().parse::<i64>()
+            if let (Ok(file), Ok(health)) = (
+                tokio::fs::read_to_string(&marker).await,
+                tokio::fs::read_to_string(&probe_marker).await,
+            ) && let (Ok(pid), Ok(probe)) =
+                (file.trim().parse::<i64>(), health.trim().parse::<i64>())
             {
-                break pid;
+                break (pid, probe);
             }
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
@@ -831,7 +836,7 @@ async fn standalone_core_crash_terminates_the_media_leader() {
     assert!(running(pid));
     core.kill().await.unwrap();
     tokio::time::timeout(Duration::from_secs(4), async {
-        while running(pid) {
+        while running(pid) || running(probe) {
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
     })

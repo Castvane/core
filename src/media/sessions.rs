@@ -73,7 +73,8 @@ struct Session {
 pub struct Sessions {
     limits: Limits,
     active: Mutex<Active>,
-    key: Zeroizing<Vec<u8>>,
+    key: std::sync::RwLock<Zeroizing<Vec<u8>>>,
+    transmitted: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -103,8 +104,21 @@ impl Sessions {
         Self {
             limits,
             active: Default::default(),
-            key,
+            key: std::sync::RwLock::new(key),
+            transmitted: Default::default(),
         }
+    }
+
+    pub(crate) fn metrics(&self) -> (usize, u64) {
+        (
+            self.state().data.len(),
+            self.transmitted.load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    pub fn rotate(&self, key: Zeroizing<Vec<u8>>) -> Result<(), Error> {
+        *self.key.write().map_err(|_| Error::Unavailable)? = key;
+        Ok(())
     }
 
     pub fn limits(&self) -> &Limits {
@@ -136,7 +150,7 @@ impl Sessions {
         request.token = jsonwebtoken::encode(
             &Header::new(Algorithm::HS256),
             &claim,
-            &EncodingKey::from_secret(&self.key),
+            &EncodingKey::from_secret(&self.key.read().map_err(|_| Error::Unavailable)?),
         )
         .map_err(|_| Error::Unavailable)?;
         Ok(())
@@ -149,8 +163,11 @@ impl Sessions {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.leeway = 0;
         validation.set_issuer(&["datarhei-core-media"]);
+        let Ok(key) = self.key.read() else {
+            return false;
+        };
         let Ok(token) =
-            jsonwebtoken::decode::<Token>(token, &DecodingKey::from_secret(&self.key), &validation)
+            jsonwebtoken::decode::<Token>(token, &DecodingKey::from_secret(&key), &validation)
         else {
             return false;
         };
@@ -345,6 +362,9 @@ impl Transfer {
             at
         };
         tokio::time::sleep_until(at.into()).await;
+        self.owner
+            .transmitted
+            .fetch_add(bytes as u64, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

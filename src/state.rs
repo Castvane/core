@@ -23,6 +23,9 @@ pub type StartupError = Box<dyn std::error::Error + Send + Sync>;
 pub struct App {
     pub(crate) store: Store,
     pub(crate) auth: Authentication,
+    pub(crate) iam: crate::iam::Iam,
+    pub(crate) ops: Arc<crate::ops::Operations>,
+    pub(crate) certificates: Arc<crate::certificates::Certificates>,
     pub(crate) media: Arc<Media>,
     pub(crate) processes: Arc<Engine>,
     pub(crate) environment: Environment,
@@ -32,6 +35,9 @@ pub struct App {
     replacement: Option<mpsc::Sender<TcpListener>>,
     pub(crate) loaded_at: tokio::sync::RwLock<String>,
     pub(crate) requests: tokio::sync::Semaphore,
+    pub(crate) trusted_proxies: Vec<ipnet::IpNet>,
+    pub(crate) request_timeout: std::time::Duration,
+    max_connections: usize,
     pub(crate) writes: tokio::sync::Mutex<()>,
     pub(crate) on_reload: Arc<dyn Fn(&str) + Send + Sync>,
 }
@@ -109,6 +115,14 @@ impl App {
         let effective = environment.apply(document.clone());
         let settings = validate(&effective, has_password)
             .map_err(|field| format!("invalid configuration field: {field}"))?;
+        let collides: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM iam_identity WHERE name = ?)")
+                .bind(&settings.api.auth.username)
+                .fetch_one(&mut *tx)
+                .await?;
+        if collides {
+            return Err("bootstrap administrator name conflicts with a managed identity".into());
+        }
         let listening = config::address(&settings.address)?;
         if !listening.ip().is_loopback() && !settings.api.auth.enable && !environment.allow_insecure
         {
@@ -169,13 +183,29 @@ impl App {
         );
         let auth = Authentication::new(key).await?;
         environment.clear_secrets();
+        let disk = std::path::PathBuf::from(root_path);
+        let initial = {
+            let disk = disk.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::ops::resources::Sampler::default().sample(&disk, Vec::new())
+            })
+            .await?
+        };
+        let budget = crate::engine::Budget::from_host(&effective, &initial)?;
         let processes = Engine::open(
             store.0.clone(),
             Options::from_document(&effective, &environment.engine)?
                 .with_media(media.endpoints(listening, false)),
+            budget,
         )
         .await?;
+        let ops = crate::ops::Operations::new(&effective, initial);
+        ops.start(&processes, &media, disk);
+        ops.emit("application", "ready", "", "");
         Ok(Self {
+            ops,
+            certificates: crate::certificates::Certificates::new(),
+            iam: crate::iam::Iam(store.0.clone()),
             store,
             auth,
             media,
@@ -186,10 +216,33 @@ impl App {
             local_address: RwLock::new(listening),
             replacement: None,
             loaded_at: tokio::sync::RwLock::new(timestamp),
-            requests: tokio::sync::Semaphore::new(128),
+            requests: tokio::sync::Semaphore::new(
+                effective["api"]["max_requests"].as_u64().unwrap_or(128) as usize,
+            ),
+            trusted_proxies: settings.api.access.trusted_proxies,
+            request_timeout: std::time::Duration::from_secs(
+                effective["api"]["timeout_seconds"].as_u64().unwrap_or(15),
+            ),
+            max_connections: effective["api"]["max_connections"].as_u64().unwrap_or(1024) as usize,
             writes: tokio::sync::Mutex::new(()),
             on_reload: Arc::new(|_| {}),
         })
+    }
+
+    /// Run an HTTP listener with this node's configured connection budget.
+    pub async fn serve<L>(self: Arc<Self>, listener: L, stop: tokio_util::sync::CancellationToken)
+    where
+        L: axum::serve::Listener,
+        L::Addr: Clone + Send + Sync + 'static,
+    {
+        crate::http_server::serve_http_with_limits(
+            listener,
+            crate::router(self.clone()),
+            stop,
+            self.max_connections,
+            Some(self.ops.clone()),
+        )
+        .await;
     }
 
     pub async fn bind(&mut self) -> std::io::Result<ReloadableListener> {
@@ -237,6 +290,17 @@ impl App {
         serde_json::from_str(&record.document).map(|document| self.environment.apply(document))
     }
 
+    pub fn capture_logs<S>(&self) -> impl tracing_subscriber::Layer<S>
+    where
+        S: tracing::Subscriber,
+    {
+        crate::ops::logs::Capture(self.ops.clone())
+    }
+
+    pub async fn log_json(&self) -> Result<bool, StartupError> {
+        Ok(self.effective(&self.store.read().await?)?["log"]["format"] == "json")
+    }
+
     pub async fn log_level(&self) -> Result<String, StartupError> {
         let record = self.store.read().await?;
         let settings: Settings = serde_json::from_value(self.effective(&record)?)?;
@@ -260,14 +324,25 @@ impl App {
         {
             return Err("authentication is required for the external HTTPS listener".into());
         }
-        crate::tls::TlsListener::bind(&doc["tls"]).await
+        let acme = crate::certificates::Acme::parse(&doc, &self.environment.db)?;
+        if let Some(acme) = &acme {
+            let root = doc["storage"]["disk"]["dir"]
+                .as_str()
+                .ok_or("invalid storage directory")?;
+            acme.check_storage(&tokio::fs::canonicalize(root).await?)
+                .await?;
+        }
+        crate::tls::TlsListener::bind(&doc["tls"], acme, self.certificates.clone()).await
     }
 
     pub fn stop_media_delivery(&self) {
+        self.ops.emit("application", "shutdown", "", "");
+        self.ops.stop.cancel();
         self.media.stop.cancel();
     }
 
     pub async fn close(&self) {
+        self.ops.stop.cancel();
         self.processes.close().await;
         self.media.close().await;
         self.store.close().await;
@@ -307,6 +382,24 @@ pub(crate) fn validate(document: &Value, has_password: bool) -> Result<Settings,
     ) {
         return Err("log.level");
     }
+    if !matches!(document["log"]["format"].as_str(), Some("console" | "json")) {
+        return Err("log.format");
+    }
+    for (field, maximum) in [
+        ("max_requests", 4096),
+        ("max_connections", 8192),
+        ("timeout_seconds", 120),
+    ] {
+        if document["api"][field]
+            .as_u64()
+            .is_none_or(|value| value == 0 || value > maximum)
+        {
+            return Err("api");
+        }
+    }
+    if settings.api.access.trusted_proxies.len() > 64 {
+        return Err("api.access.trusted_proxies");
+    }
     if document["log"]["max_lines"]
         .as_i64()
         .is_none_or(|lines| lines < 0)
@@ -315,6 +408,12 @@ pub(crate) fn validate(document: &Value, has_password: bool) -> Result<Settings,
     }
     if document["db"]["dir"].as_str().is_none_or(str::is_empty) {
         return Err("db.dir");
+    }
+    let jwt = &settings.api.auth.jwt;
+    if !(30..=86_400).contains(&jwt.access_ttl_sec)
+        || !(jwt.access_ttl_sec..=2_592_000).contains(&jwt.refresh_ttl_sec)
+    {
+        return Err("api.auth.jwt");
     }
     if settings.api.auth.enable || has_password {
         let username = settings.api.auth.username.as_str();

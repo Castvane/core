@@ -67,6 +67,11 @@ fn meta(key: &Key, metadata: &Metadata) -> Result<Meta, Error> {
 
 #[async_trait]
 impl Storage for Disk {
+    async fn health(&self) -> Result<(), Error> {
+        let root = self.root.clone();
+        io(move || root.dir_metadata().map(|_| ()).map_err(Error::from)).await
+    }
+
     async fn stat(&self, key: &Key) -> Result<Meta, Error> {
         let root = self.root.clone();
         let key = key.clone();

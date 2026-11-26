@@ -2,10 +2,14 @@
 
 mod api;
 mod auth;
+mod certificates;
 pub mod config;
 mod engine;
 mod http_server;
+mod iam;
 mod listener;
+mod ops;
+mod zone;
 pub use http_server::serve_http;
 mod media;
 mod persistence;

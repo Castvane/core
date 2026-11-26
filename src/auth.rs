@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::Mutex,
+    sync::{Mutex, RwLock},
     time::{Duration, Instant},
 };
 
@@ -16,14 +16,17 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 const ISSUER: &str = "datarhei-core";
-pub const ACCESS_TTL: i64 = 600;
-pub const REFRESH_TTL: i64 = 86_400;
+#[cfg(test)]
+const ACCESS_TTL: i64 = 600;
+#[cfg(test)]
+const REFRESH_TTL: i64 = 86_400;
 const WINDOW: Duration = Duration::from_secs(60);
 const PEER_LIMIT: usize = 1024;
 
 #[derive(Clone)]
 pub enum Identity {
     Administrator,
+    Managed(crate::iam::Principal),
     TrustedLocalClient,
     Anonymous,
 }
@@ -38,8 +41,29 @@ pub enum Permission {
 }
 
 impl Identity {
-    pub fn permits(&self, _permission: Permission) -> bool {
+    pub fn administrator(&self) -> bool {
         matches!(self, Self::Administrator | Self::TrustedLocalClient)
+            || matches!(self, Self::Managed(identity) if identity.administrator)
+    }
+
+    pub fn permits(&self, permission: Permission) -> bool {
+        self.administrator()
+            || matches!(
+                (self, permission),
+                (Self::Managed(_), Permission::ReadDiscovery)
+            )
+    }
+
+    pub fn allows(&self, domain: &str, kind: &str, resource: &str, action: &str) -> bool {
+        self.administrator()
+            || matches!(self, Self::Managed(identity) if identity.permits(domain, kind, resource, action))
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Managed(identity) => Some(&identity.name),
+            _ => None,
+        }
     }
 }
 
@@ -68,7 +92,7 @@ pub enum TokenError {
 }
 
 pub struct Authentication {
-    key: Zeroizing<Vec<u8>>,
+    key: RwLock<Zeroizing<Vec<u8>>>,
     dummy_hash: String,
     attempts: Mutex<Attempts>,
     password_jobs: std::sync::Arc<Semaphore>,
@@ -83,7 +107,7 @@ impl Authentication {
     pub async fn new(key: Zeroizing<Vec<u8>>) -> Result<Self, &'static str> {
         let dummy_hash = hash_password(Zeroizing::new(Uuid::new_v4().to_string())).await?;
         Ok(Self {
-            key,
+            key: RwLock::new(key),
             dummy_hash,
             attempts: Mutex::new(Attempts {
                 peers: HashMap::new(),
@@ -138,14 +162,43 @@ impl Authentication {
         .map_err(|_| "password verifier failed")
     }
 
+    #[cfg(test)]
     pub fn issue(
         &self,
         subject: &str,
         generation: &str,
         usefor: TokenUse,
-    ) -> Result<String, jsonwebtoken::errors::Error> {
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.issue_at(subject, generation, usefor, now)
+    ) -> Result<String, &'static str> {
+        self.issue_with_ttl(
+            subject,
+            generation,
+            usefor,
+            match usefor {
+                TokenUse::Access => ACCESS_TTL,
+                TokenUse::Refresh => REFRESH_TTL,
+            },
+        )
+    }
+
+    pub fn rotate(&self, key: Zeroizing<Vec<u8>>) -> Result<(), &'static str> {
+        *self.key.write().map_err(|_| "signing key unavailable")? = key;
+        Ok(())
+    }
+
+    pub fn issue_with_ttl(
+        &self,
+        subject: &str,
+        generation: &str,
+        usefor: TokenUse,
+        ttl: i64,
+    ) -> Result<String, &'static str> {
+        self.issue_at(
+            subject,
+            generation,
+            usefor,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            ttl,
+        )
     }
 
     fn issue_at(
@@ -154,11 +207,8 @@ impl Authentication {
         generation: &str,
         usefor: TokenUse,
         now: i64,
-    ) -> Result<String, jsonwebtoken::errors::Error> {
-        let ttl = match usefor {
-            TokenUse::Access => ACCESS_TTL,
-            TokenUse::Refresh => REFRESH_TTL,
-        };
+        ttl: i64,
+    ) -> Result<String, &'static str> {
         let claims = Claims {
             iss: ISSUER.into(),
             sub: subject.into(),
@@ -169,13 +219,16 @@ impl Authentication {
             jti: Uuid::new_v4().to_string(),
             generation: generation.into(),
         };
+        let key = self.key.read().map_err(|_| "signing key unavailable")?;
         jsonwebtoken::encode(
             &Header::new(Algorithm::HS256),
             &claims,
-            &EncodingKey::from_secret(&self.key),
+            &EncodingKey::from_secret(&key),
         )
+        .map_err(|_| "signing failed")
     }
 
+    #[cfg(test)]
     pub fn validate(
         &self,
         token: &str,
@@ -183,29 +236,38 @@ impl Authentication {
         generation: Option<&str>,
         purpose: TokenUse,
     ) -> Result<Identity, TokenError> {
+        let (token_subject, token_generation) = self.authenticate(token, purpose)?;
+        if token_subject != subject || generation != Some(token_generation.as_str()) {
+            return Err(TokenError::Invalid);
+        }
+        Ok(Identity::Administrator)
+    }
+
+    pub fn authenticate(
+        &self,
+        token: &str,
+        purpose: TokenUse,
+    ) -> Result<(String, String), TokenError> {
         if token.len() > 4096 {
             return Err(TokenError::Invalid);
         }
         let mut validation = Validation::new(Algorithm::HS256);
         validation.leeway = 0;
         validation.set_issuer(&[ISSUER]);
-        validation.sub = Some(subject.into());
         validation.set_required_spec_claims(&["exp", "iss", "sub"]);
-        let claims = jsonwebtoken::decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(&self.key),
-            &validation,
-        )
-        .map_err(|_| TokenError::Invalid)?
-        .claims;
+        let key = self.key.read().map_err(|_| TokenError::Invalid)?;
+        let claims =
+            jsonwebtoken::decode::<Claims>(token, &DecodingKey::from_secret(&key), &validation)
+                .map_err(|_| TokenError::Invalid)?
+                .claims;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        if generation != Some(claims.generation.as_str()) || claims.iat > now || claims.exp <= now {
+        if claims.iat > now || claims.exp <= now {
             return Err(TokenError::Invalid);
         }
         if claims.usefor != purpose {
             return Err(TokenError::WrongUse);
         }
-        Ok(Identity::Administrator)
+        Ok((claims.sub, claims.generation))
     }
 }
 
@@ -239,7 +301,7 @@ mod tests {
             .await
             .unwrap();
         let expired = auth
-            .issue_at("admin", "current", TokenUse::Access, 1)
+            .issue_at("admin", "current", TokenUse::Access, 1, ACCESS_TTL)
             .unwrap();
         assert!(matches!(
             auth.validate(&expired, "admin", Some("current"), TokenUse::Access),

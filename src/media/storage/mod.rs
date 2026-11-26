@@ -112,6 +112,9 @@ impl From<std::io::Error> for Error {
 
 #[async_trait]
 pub trait Storage: Send + Sync {
+    async fn health(&self) -> Result<(), Error> {
+        Ok(())
+    }
     async fn stat(&self, key: &Key) -> Result<Meta, Error>;
     async fn read(&self, meta: &Meta, range: Range<u64>) -> Result<Stream, Error>;
     async fn put(&self, key: &Key, stream: Stream) -> Result<bool, Error>;

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Request, State},
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -98,7 +98,7 @@ pub(super) fn query(request: &Request, field: &str) -> Option<String> {
     query_uri(request.uri(), field)
 }
 
-fn query_uri(uri: &Uri, field: &str) -> Option<String> {
+pub(super) fn query_uri(uri: &Uri, field: &str) -> Option<String> {
     url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
         .take(40)
         .find(|(key, _)| key == field)
@@ -125,13 +125,21 @@ async fn filesystems(State(app): State<Arc<App>>, request: Request) -> JsonRespo
 async fn files(
     State(app): State<Arc<App>>,
     Path(storage): Path<String>,
+    Extension(actor): Extension<crate::auth::Identity>,
     request: Request,
 ) -> JsonResponse {
     let mount = app.media.get(&storage)?;
+    let domain = query(&request, "domain").unwrap_or_default();
     let files = select(mount, request.uri(), false).await?;
     Ok(Json(json!(
         files
             .iter()
+            .filter(|meta| actor.allows(
+                &domain,
+                "fs",
+                &format!("/{storage}/{}", meta.key.as_str()),
+                "read"
+            ))
             .map(|meta| json!({"name":format!("/{}",meta.key.as_str()),
         "size_bytes":meta.size,"last_modified":now_secs(meta.modified)}))
             .collect::<Vec<_>>()
@@ -193,7 +201,9 @@ async fn delete_many(
     let mut deleted = Vec::new();
     for item in select(mount, request.uri(), true).await? {
         mount.backend.delete(&item.key).await?;
-        deleted.push(format!("/{}", item.key.as_str()));
+        let name = format!("/{}", item.key.as_str());
+        app.ops.emit("media", "remove", &name, &storage);
+        deleted.push(name);
     }
     Ok(Json(json!(deleted)))
 }
@@ -223,7 +233,19 @@ async fn put_file(
     request: Request,
 ) -> Result<Response, ApiError> {
     let mount = app.media.get(&storage)?;
-    media_http::write(&app.media, mount, &Key::parse(&path)?, request.into_body()).await
+    let key = Key::parse(&path)?;
+    let response = media_http::write(&app.media, mount, &key, request.into_body()).await?;
+    app.ops.emit(
+        "media",
+        if response.status() == StatusCode::CREATED {
+            "add"
+        } else {
+            "replace"
+        },
+        &format!("/{}", key.as_str()),
+        &storage,
+    );
+    Ok(response)
 }
 
 async fn delete_file(
@@ -232,7 +254,9 @@ async fn delete_file(
 ) -> Result<Response, ApiError> {
     let key = Key::parse(&path)?;
     app.media.get(&storage)?.backend.delete(&key).await?;
-    Ok(format!("Deleted: /{}", key.as_str()).into_response())
+    let name = format!("/{}", key.as_str());
+    app.ops.emit("media", "remove", &name, &storage);
+    Ok(format!("Deleted: {name}").into_response())
 }
 
 #[derive(Deserialize)]

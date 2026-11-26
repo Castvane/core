@@ -30,6 +30,7 @@ pub struct Mount {
     pub kind: &'static str,
     pub prefix: String,
     pub backend: Arc<dyn Storage>,
+    pub required: bool,
     pub auth: Option<(String, Zeroizing<String>)>,
 }
 
@@ -38,6 +39,8 @@ pub struct Media {
     pub sessions: Arc<Sessions>,
     pub aliases: Aliases,
     pub transport: Option<Transport>,
+    pub transport_requested: bool,
+    pub transport_required: bool,
     pub private: bool,
     pub allowed_origins: Vec<String>,
     pub mime: BTreeMap<String, String>,
@@ -104,6 +107,7 @@ impl Media {
                 prefix: "/".into(),
                 backend: Arc::new(disk),
                 auth: None,
+                required: true,
             },
         );
         let memsize = mbytes(&memory["max_size_mbytes"], 64)?;
@@ -119,6 +123,7 @@ impl Media {
                 prefix: "/memfs".into(),
                 backend: Arc::new(mem),
                 auth: None,
+                required: true,
             },
         );
         let s3 = storage["s3"].as_array().into_iter().flatten();
@@ -160,11 +165,25 @@ impl Media {
                     prefix: cfg.mountpoint,
                     backend: Arc::new(backend),
                     auth,
+                    required: entry["required"].as_bool().unwrap_or(false),
                 },
             );
         }
         let limits = Limits::from_document(&doc["sessions"])?;
-        let transport = Transport::open(doc, &limits, launcher.as_deref()).await?;
+        let transport_requested = ["rtmp", "srt"]
+            .into_iter()
+            .any(|service| doc[service]["enable"].as_bool() == Some(true))
+            || doc["rtmp"]["enable_tls"].as_bool() == Some(true);
+        let transport_required = ["rtmp", "srt"]
+            .into_iter()
+            .any(|service| doc[service]["required"].as_bool() == Some(true));
+        let transport = match Transport::open(doc, &limits, launcher.as_deref()).await {
+            Err(Error::Unavailable) if !transport_required => {
+                tracing::warn!("optional media companion is unavailable");
+                None
+            }
+            result => result?,
+        };
         if let Some(flv) = transport.as_ref().and_then(Transport::flv_mount)
             && prefixes.contains(flv)
         {
@@ -202,6 +221,8 @@ impl Media {
             aliases: Aliases::open(pool).await?,
             sessions: Arc::new(Sessions::new(limits, key)),
             transport,
+            transport_requested,
+            transport_required,
             private: storage["private"].as_bool().unwrap_or(false),
             allowed_origins: strings(&storage["cors"]["origins"]),
             mime: serde_json::from_value(storage["mimetypes"].clone()).unwrap_or_default(),

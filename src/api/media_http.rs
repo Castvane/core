@@ -71,10 +71,7 @@ pub async fn public(State(app): State<Arc<App>>, request: Request) -> Result<Res
     }
     let media = &app.media;
     let source_peer = peer(&request);
-    let secure = request
-        .extensions()
-        .get::<axum::extract::ConnectInfo<crate::tls::TlsPeer>>()
-        .is_some();
+    let secure = super::secure_transport(&request);
     let mut parameters = parameters(request.uri().query());
     parameters.secure = secure;
     let cookies = request
@@ -189,8 +186,16 @@ pub async fn public(State(app): State<Arc<App>>, request: Request) -> Result<Res
                         request.headers(),
                         peer(&request),
                         TokenUse::Access,
-                    )?;
-                    if !identity.permits(Permission::WriteConfig) {
+                    )
+                    .await?;
+                    if !identity.permits(Permission::WriteConfig)
+                        && !identity.allows(
+                            "",
+                            "fs",
+                            &format!("/{}/{}", mount.name, key.as_str()),
+                            "write",
+                        )
+                    {
                         if mount.kind == "mem" || mount.kind == "s3" {
                             return Ok((
                                 StatusCode::UNAUTHORIZED,
@@ -203,9 +208,19 @@ pub async fn public(State(app): State<Arc<App>>, request: Request) -> Result<Res
                 }
                 if method == Method::DELETE {
                     mount.backend.delete(&key).await?;
-                    format!("Deleted: /{}", key.as_str()).into_response()
+                    let name = format!("/{}", key.as_str());
+                    app.ops.emit("media", "remove", &name, &mount.name);
+                    format!("Deleted: {name}").into_response()
                 } else {
-                    write(media, mount, &key, request.into_body()).await?
+                    let response = write(media, mount, &key, request.into_body()).await?;
+                    let action = if response.status() == StatusCode::CREATED {
+                        "add"
+                    } else {
+                        "replace"
+                    };
+                    app.ops
+                        .emit("media", action, &format!("/{}", key.as_str()), &mount.name);
+                    response
                 }
             }
             _ => return Err(ApiError::not_found()),
@@ -295,8 +310,17 @@ async fn authorize_download(
         return Err(Error::Forbidden.into());
     }
     let (record, settings) = read_settings(app).await?;
-    let identity = identify(app, &record, &settings, headers, source, TokenUse::Access)?;
-    if !identity.permits(Permission::ReadConfig) {
+    let identity = identify(app, &record, &settings, headers, source, TokenUse::Access).await?;
+    if !identity.permits(Permission::ReadConfig)
+        && !app.media.mounted(resolved).is_ok_and(|(mount, key)| {
+            identity.allows(
+                "",
+                "fs",
+                &format!("/{}/{}", mount.name, key.as_str()),
+                "read",
+            )
+        })
+    {
         return Err(Error::Forbidden.into());
     }
     Ok(())

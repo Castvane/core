@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use super::{error::ApiError, process_dto as dto};
 use crate::{
     App,
+    auth::Identity,
     engine::{self, Control, Entry, Error, Key, Run},
 };
 
@@ -163,13 +164,14 @@ async fn inventory(app: &App, reload: bool) -> Response {
 async fn create(
     State(app): State<Arc<App>>,
     Extension(caller): Extension<Caller>,
+    Extension(actor): Extension<Identity>,
     data: Result<Json<Value>, JsonRejection>,
 ) -> Response {
     let data = body(data)?;
     let config = app
         .processes
         .edit(None, false, move |previous| {
-            Ok(dto::Configuration::from_patch(previous, data, &caller.0, true)?.into_config())
+            write_config(previous, data, &caller, &actor)
         })
         .await?;
     serialize(dto::Configuration::from_config(&config))
@@ -180,6 +182,7 @@ async fn update(
     Path(id): Path<String>,
     args: QueryArgs,
     Extension(caller): Extension<Caller>,
+    Extension(actor): Extension<Identity>,
     data: Result<Json<Value>, JsonRejection>,
 ) -> Response {
     let params = query(args)?;
@@ -189,12 +192,31 @@ async fn update(
         .edit(
             Some(params.key(id)),
             params.force == "restart",
-            move |previous| {
-                Ok(dto::Configuration::from_patch(previous, data, &caller.0, true)?.into_config())
-            },
+            move |previous| write_config(previous, data, &caller, &actor),
         )
         .await?;
     serialize(dto::Configuration::from_config(&config))
+}
+
+fn write_config(
+    prior: Option<&engine::Config>,
+    value: Value,
+    caller: &Caller,
+    actor: &Identity,
+) -> Result<(engine::Config, engine::Metadata), Error> {
+    let (mut config, metadata) =
+        dto::Configuration::from_patch(prior, value, &caller.0, true)?.into_config();
+    if !actor.administrator() {
+        if !actor.allows(&config.domain, "process", &config.id, "write")
+            || (crate::zone::canonical(&config.zone) != crate::zone::DEFAULT
+                && !actor.allows(&config.domain, "zone", &config.zone, "write"))
+        {
+            return Err(Error::Forbidden("access denied"));
+        }
+        config.owner = prior.map_or_else(|| caller.0.clone(), |config| config.owner.clone());
+    }
+    config.scoped = !actor.administrator() || prior.is_some_and(|config| config.scoped);
+    Ok((config, metadata))
 }
 
 async fn delete(State(app): State<Arc<App>>, Path(id): Path<String>, args: QueryArgs) -> Response {
@@ -270,7 +292,11 @@ async fn get_job(State(app): State<Arc<App>>, Path(id): Path<String>, args: Quer
     ))
 }
 
-async fn list(State(app): State<Arc<App>>, args: QueryArgs) -> Response {
+async fn list(
+    State(app): State<Arc<App>>,
+    Extension(actor): Extension<Identity>,
+    args: QueryArgs,
+) -> Response {
     let params = query(args)?;
     let (_, settings) = super::read_settings(&app).await?;
     let mut items = Vec::new();
@@ -278,7 +304,11 @@ async fn list(State(app): State<Arc<App>>, args: QueryArgs) -> Response {
     let entries = app.processes.list().await;
     for entry in entries
         .into_iter()
-        .filter(|entry| params.matches(&entry.job().config))
+        .filter(|entry| {
+            let job = entry.job();
+            params.matches(&job.config)
+                && actor.allows(&job.config.domain, "process", &job.config.id, "read")
+        })
         .skip(params.offset)
         .take(params.limit.unwrap_or(engine::MAX_JOBS))
     {
@@ -403,14 +433,20 @@ async fn set_report(
     ok()
 }
 
-async fn search(State(app): State<Arc<App>>, args: QueryArgs) -> Response {
+async fn search(
+    State(app): State<Arc<App>>,
+    Extension(actor): Extension<Identity>,
+    args: QueryArgs,
+) -> Response {
     let params = query(args)?;
     let from = timestamp(&params.from)?;
     let to = timestamp(&params.to)?;
     let mut items = Vec::new();
     for entry in app.processes.list().await {
         let job = entry.job();
-        if !params.matches(&job.config) {
+        if !params.matches(&job.config)
+            || !actor.allows(&job.config.domain, "process", &job.config.id, "read")
+        {
             continue;
         }
         let history = app.processes.history(&job.uid).await?;

@@ -1,3 +1,4 @@
+mod budget;
 mod command;
 pub(crate) mod executable;
 mod model;
@@ -22,6 +23,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+pub(crate) use budget::Budget;
 pub(crate) use command::{Options, sanitize};
 pub(crate) use model::*;
 pub(crate) use probe::ResultSet;
@@ -118,6 +120,7 @@ impl Entry {
 #[derive(Clone)]
 pub struct Event {
     pub process: String,
+    pub domain: String,
     pub execution: Execution,
 }
 
@@ -131,6 +134,7 @@ pub struct Engine {
     options: watch::Sender<Arc<Options>>,
     shutdown: watch::Sender<bool>,
     slots: Arc<Semaphore>,
+    budget: Arc<Budget>,
     probes: Semaphore,
     events: broadcast::Sender<Event>,
     skills: tokio::sync::Mutex<Option<SkillsCache>>,
@@ -142,7 +146,11 @@ struct SkillsCache {
 }
 
 impl Engine {
-    pub async fn open(pool: SqlitePool, options: Options) -> Result<Arc<Self>, Error> {
+    pub async fn open(
+        pool: SqlitePool,
+        options: Options,
+        budget: Arc<Budget>,
+    ) -> Result<Arc<Self>, Error> {
         let repository = Repository(pool);
         let jobs = repository.all().await?;
         if jobs.len() > MAX_JOBS {
@@ -175,6 +183,7 @@ impl Engine {
             options,
             shutdown,
             slots: Arc::new(Semaphore::new(MAX_JOBS)),
+            budget,
             probes: Semaphore::new(4),
             events,
             skills: tokio::sync::Mutex::new(None),
@@ -220,6 +229,7 @@ impl Engine {
             options: self.options.subscribe(),
             shutdown: self.shutdown.subscribe(),
             slots: self.slots.clone(),
+            budget: self.budget.clone(),
             events: self.events.clone(),
         };
         *lock(&entry.task) = Some(worker.spawn(&entry, receiver));
@@ -264,6 +274,10 @@ impl Engine {
             .get(key)
             .cloned()
             .ok_or(Error::Missing("unknown process"))
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<Event> {
+        self.events.subscribe()
     }
 
     pub async fn list(&self) -> Vec<Arc<Entry>> {
@@ -315,6 +329,7 @@ impl Engine {
                 updated: now,
                 config,
             });
+            engine.budget.validate(&job.config.limits)?;
             let command = options
                 .build(&job.config, &proposed, &lock(&engine.live))?
                 .display;
@@ -517,6 +532,18 @@ impl Engine {
         probe::inspect(&options, command).await
     }
 
+    pub(crate) async fn executable_ready(&self) -> bool {
+        let options = self.options.borrow().clone();
+        executable::capture(
+            &options.ffmpeg,
+            &["-version".into()],
+            std::time::Duration::from_secs(2),
+            options.launcher.as_deref(),
+        )
+        .await
+        .is_ok_and(|result| result.success)
+    }
+
     pub async fn skills(&self, reload: bool) -> Result<Arc<Inventory>, Error> {
         let mut cache = self.skills.lock().await;
         let options = self.options.borrow().clone();
@@ -558,6 +585,10 @@ impl Engine {
             .await
     }
 
+    pub fn reservations(&self) -> Value {
+        self.budget.diagnostics()
+    }
+
     pub fn diagnostics(&self) -> (usize, bool) {
         let options = self.options.borrow();
         (options.max_children, options.cgroup.is_some())
@@ -575,6 +606,6 @@ pub enum Control {
 fn key(config: &Config) -> Key {
     (config.domain.clone(), config.id.clone())
 }
-fn unix_now() -> i64 {
+pub(crate) fn unix_now() -> i64 {
     jiff::Timestamp::now().as_second()
 }

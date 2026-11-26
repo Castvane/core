@@ -37,6 +37,7 @@ impl Repository {
 
     pub async fn save(&self, job: &Job, metadata: BTreeMap<String, Value>) -> Result<(), Error> {
         let mut tx = self.0.begin_with("BEGIN IMMEDIATE").await?;
+        crate::zone::validate_claim(&mut tx, job).await?;
         sqlx::query(
             "INSERT INTO process_jobs VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(uid) DO UPDATE SET domain=excluded.domain, id=excluded.id,

@@ -29,6 +29,7 @@ pub struct Supervisor {
     pub options: watch::Receiver<Arc<Options>>,
     pub shutdown: watch::Receiver<bool>,
     pub slots: Arc<Semaphore>,
+    pub budget: Arc<super::Budget>,
     pub events: broadcast::Sender<Event>,
 }
 
@@ -144,13 +145,24 @@ impl Supervisor {
                 delay = Duration::from_millis(250);
                 continue;
             }
-            let reason =
-                if let (Some(graph), Some(live)) = (self.graph.upgrade(), self.live.upgrade()) {
-                    let graph = graph.read().await;
-                    options.build(&job.config, &graph, &lock(&live))
-                } else {
-                    Err(Error::Internal)
+            let fits = self.budget.validate(&job.config.limits);
+            let mut reservation = None;
+            if fits.is_ok() {
+                let Some(claim) = self.budget.claim(&job.config.limits) else {
+                    drop(permit);
+                    delay = Duration::from_millis(250);
+                    continue;
                 };
+                reservation = Some(claim);
+            }
+            let reason = if let Err(error) = fits {
+                Err(error)
+            } else if let (Some(graph), Some(live)) = (self.graph.upgrade(), self.live.upgrade()) {
+                let graph = graph.read().await;
+                options.build(&job.config, &graph, &lock(&live))
+            } else {
+                Err(Error::Internal)
+            };
             let exit = match reason {
                 Ok(command) => self.execute(job, command, &options, state, updates).await,
                 Err(error) => {
@@ -169,6 +181,7 @@ impl Supervisor {
                     }
                 }
             };
+            drop(reservation);
             drop(permit);
             let run = {
                 let mut runtime = lock(state);
@@ -203,7 +216,8 @@ impl Supervisor {
                 );
             }
             let _ = self.events.send(Event {
-                process: job.uid.clone(),
+                process: job.config.id.clone(),
+                domain: job.config.domain.clone(),
                 execution: exit.state,
             });
             if !*self.shutdown.borrow()
@@ -312,7 +326,8 @@ impl Supervisor {
             runtime.usage = usage.clone();
         }
         let _ = self.events.send(Event {
-            process: job.uid.clone(),
+            process: job.config.id.clone(),
+            domain: job.config.domain.clone(),
             execution: Execution::Running,
         });
         let heartbeat = Arc::new(Mutex::new(Heartbeat::default()));

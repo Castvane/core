@@ -134,6 +134,7 @@ impl Configuration {
             Config {
                 id: self.id,
                 owner: self.owner,
+                scoped: false,
                 domain: self.domain,
                 zone: if self.zone.is_empty() {
                     "$default".into()

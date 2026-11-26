@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     net::{IpAddr, SocketAddr},
     path::Path,
     process::Stdio,
@@ -95,7 +95,18 @@ pub fn eq(left: &str, right: &str) -> bool {
     bool::from(left.as_bytes().ct_eq(right.as_bytes()))
 }
 
+#[derive(Clone, Default)]
+pub struct TransportMetrics {
+    pub publishers: usize,
+    pub rtmp: usize,
+    pub srt: usize,
+    pub bandwidth_bytes_per_second: f64,
+    pub publisher_names: BTreeSet<(&'static str, String)>,
+    pub available: bool,
+}
+
 pub struct Transport {
+    metrics: Arc<Mutex<TransportMetrics>>,
     endpoint: String,
     client: reqwest::Client,
     rtmp: Option<(SocketAddr, bool)>,
@@ -270,7 +281,7 @@ impl Transport {
                 .await;
         });
         drop(reserved);
-        let mut child = command.spawn()?;
+        let mut child = command.spawn().map_err(|_| Error::Unavailable)?;
         let deadline = Instant::now() + Duration::from_secs(8);
         let mut started = false;
         while Instant::now() < deadline {
@@ -296,7 +307,9 @@ impl Transport {
         if !started {
             return Err(Error::Unavailable);
         }
+        let metrics = Arc::new(Mutex::new(TransportMetrics::default()));
         let supervisor = Monitor {
+            metrics: metrics.clone(),
             client: client.clone(),
             endpoint: endpoint.clone(),
             policy: policy.clone(),
@@ -310,6 +323,7 @@ impl Transport {
         tokio::spawn(supervisor.run());
         shutdown.disarm();
         Ok(Some(Self {
+            metrics,
             endpoint,
             client,
             rtmp,
@@ -326,6 +340,13 @@ impl Transport {
             _dir: dir,
             stop,
         }))
+    }
+
+    pub fn metrics(&self) -> TransportMetrics {
+        self.metrics
+            .lock()
+            .map(|stats| stats.clone())
+            .unwrap_or_default()
     }
 
     pub fn enabled(&self, protocol: &str) -> bool {
@@ -633,6 +654,7 @@ async fn connections(
 }
 
 struct Monitor {
+    metrics: Arc<Mutex<TransportMetrics>>,
     client: reqwest::Client,
     endpoint: String,
     policy: Arc<Policy>,
@@ -649,11 +671,14 @@ impl Monitor {
         loop {
             tokio::select! {_=self.stop.cancelled()=>return,_=ticker.tick()=>{}}
             let mut current = Vec::new();
+            let mut available = true;
             for protocol in self.protocols.into_iter().flatten() {
                 if let Ok(list) =
                     connections(&self.client, &self.endpoint, &self.policy.admin, protocol).await
                 {
                     current.extend(list.into_iter().map(|conn| (protocol, conn)));
+                } else {
+                    available = false;
                 }
             }
             if let Ok(mut admission) = self.policy.admission.lock() {
@@ -680,6 +705,31 @@ impl Monitor {
                     .entry((*protocol, connection.path.as_str()))
                     .or_default() += rate;
                 usage.push((*protocol, connection, rate));
+            }
+            if let Ok(mut stats) = self.metrics.lock() {
+                *stats = TransportMetrics {
+                    publishers: current.iter().filter(|(_, c)| c.publisher).count(),
+                    rtmp: current
+                        .iter()
+                        .filter(|(protocol, _)| *protocol != "srt")
+                        .count(),
+                    srt: current
+                        .iter()
+                        .filter(|(protocol, _)| *protocol == "srt")
+                        .count(),
+                    bandwidth_bytes_per_second: total,
+                    publisher_names: current
+                        .iter()
+                        .filter(|(_, c)| c.publisher)
+                        .map(|(protocol, c)| {
+                            (
+                                if *protocol == "srt" { "srt" } else { "rtmp" },
+                                format!("/{}", c.path),
+                            )
+                        })
+                        .collect(),
+                    available,
+                };
             }
             previous = next;
             usage.sort_by(|a, b| b.2.total_cmp(&a.2));

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub id: String,
     pub owner: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scoped: bool,
     pub domain: String,
     pub zone: String,
     pub binary: String,

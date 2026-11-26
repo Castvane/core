@@ -43,6 +43,8 @@ zeroize = "1"
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "fs", "process", "io-util"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 tower = { version = "0.5", features = ["util"] }
+instant-acme = { version = "0.8.5", features = ["rcgen"] }
+x509-parser = "0.18"

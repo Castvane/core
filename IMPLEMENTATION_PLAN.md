@@ -1,4 +1,4 @@
-# Independent Rust core — implementation plan
+# Castvane Core implementation plan
 
 ## Goals and non-goals
 
@@ -48,7 +48,7 @@ The Rust media service integrates disk, memory and S3 mounts with HTTP delivery,
 
 ### 4 — Operations and IAM
 
-Implement legacy IAM policies, users, zones, metrics, events, protocol configuration, TLS/certificates and GPU capabilities. Introduce least-privilege service identity, validated destinations, storage boundaries, secrets handling and process isolation. Verify resource limits under cgroups, and CPU/GPU execution on supported deployment images. Match reference API behavior while documenting deliberate security fixes.
+The standalone operations layer uses SQLite for managed identities, policy assignments, zone declarations and durable audit events. Linux sampling, request budgets, bounded event streams and rustls certificate management operate locally. [Phase 4 status](docs/PHASE_4_STATUS.md) records automated checks, remaining v3 differences, and exit gates.
 
 ### 5 — Distributed control plane
 

@@ -1,19 +1,19 @@
 {
   "version": 3,
   "id": "",
-  "name": "restreamer",
+  "name": "castvane",
   "address": "127.0.0.1:8080",
   "update_check": true,
-  "log": {"level":"info","topics":[],"max_lines":1000},
+  "log": {"format":"console","level":"info","topics":[],"max_lines":1000},
   "db": {"dir":"./config"},
   "host": {"name":[],"auto":true},
   "compress": {"encoding":["gzip"],"mimetypes":["text/plain","text/html","text/css","text/javascript","application/json","application/x-mpegurl","application/vnd.apple.mpegurl","image/svg+xml","text/event-stream","application/x-json-stream"],"min_length":1000},
   "api": {
-    "read_only":false,
-    "access":{"http":{"allow":[],"block":[]},"https":{"allow":[],"block":[]}},
-    "auth":{"enable":false,"disable_localhost":false,"username":"","password":"","jwt":{"secret":""},"auth0":{"enable":false,"tenants":[]}}
+    "read_only":false,"max_requests":128,"timeout_seconds":15,"max_connections":1024,
+    "access":{"trusted_proxies":[],"http":{"allow":[],"block":[]},"https":{"allow":[],"block":[]}},
+    "auth":{"enable":false,"disable_localhost":false,"username":"","password":"","jwt":{"secret":"","access_ttl_sec":600,"refresh_ttl_sec":86400},"auth0":{"enable":false,"tenants":[]}}
   },
-  "tls":{"address":":8181","enable":false,"auto":false,"email":"cert@datarhei.com","staging":false,"secret":"","cert_file":"","key_file":"","trust_file":""},
+  "tls":{"address":":8181","enable":false,"auto":false,"email":"","staging":false,"secret":"","cert_file":"","key_file":"","trust_file":"","acme_directory":"","acme_storage":"","acme_ca_file":"","acme_agree":false,"acme_renew_before_seconds":2592000},
   "storage":{
     "private":false,"upload_bitrate_kbit":0,"download_bitrate_kbit":0,
     "disk":{"dir":"./data","max_size_mbytes":0,"cache":{"enable":true,"max_size_mbytes":0,"ttl_seconds":300,"max_file_size_mbytes":1,"types":{"allow":[],"block":[".m3u8",".mpd"]}}},
@@ -28,8 +28,8 @@
       ".woff":"font/woff",".woff2":"font/woff2",".xml":"application/xml"
     }
   },
-  "rtmp":{"transport_binary":"mediamtx","enable":false,"enable_tls":false,"address":":1935","address_tls":":1936","app":"/","token":"","httpflv":{"enable":false,"mount":"/rtmp"}},
-  "srt":{"enable":false,"address":":6000","passphrase":"","token":"","log":{"enable":false,"topics":[]}},
+  "rtmp":{"required":false,"transport_binary":"mediamtx","enable":false,"enable_tls":false,"address":":1935","address_tls":":1936","app":"/","token":"","httpflv":{"enable":false,"mount":"/rtmp"}},
+  "srt":{"required":false,"enable":false,"address":":6000","passphrase":"","token":"","log":{"enable":false,"topics":[]}},
   "ffmpeg":{"binary":"ffmpeg","probe_binary":"","probe_timeout_seconds":8,"stop_timeout_seconds":3,"max_retries":10,"max_processes":0,"disable_throttling":false,"access":{"input":{"allow":[],"block":[]},"output":{"allow":[],"block":[]}},"log":{"max_lines":50,"max_history":3,"max_minimal_history":0}},
   "playout":{"enable":false,"min_port":0,"max_port":0},
   "debug":{"profiling":false,"force_gc":0,"memory_limit_mbytes":0,"auto_max_procs":false,"agent_address":""},

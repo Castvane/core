@@ -18,7 +18,7 @@ pub async fn index() -> Html<&'static str> {
 pub async fn document() -> Json<Value> {
     let mut spec = json!({
         "openapi": "3.1.0",
-        "info": {"title":"Restreamer Core", "version":env!("CARGO_PKG_VERSION")},
+        "info": {"title":"Castvane Core", "version":env!("CARGO_PKG_VERSION")},
         "paths": {
             "/ping":{"get":{"summary":"Check liveness","responses":{"200":{"description":"Alive","content":{"text/plain":{"schema":{"const":"pong"}}}}}}},
             "/api":{"get":{"summary":"Discover node and available features","security":[{},{"bearer":[]}],"responses":{"200":{"description":"Discovery document","content":{"application/json":{"schema":{"type":"object","required":["app","auths","version","capabilities"]}}}},"401":error(),"403":error()}}},
@@ -66,6 +66,7 @@ pub async fn document() -> Json<Value> {
         }
     }
     media_paths(&mut spec);
+    operations_paths(&mut spec);
     Json(spec)
 }
 
@@ -202,6 +203,87 @@ fn media_paths(spec: &mut Value) {
     schemas["StorageOperation"] = json!({"type":"object","required":["source","target","operation"],
         "properties":{"operation":{"enum":["copy","move"]},"source":{"type":"string"},
                       "target":{"type":"string"},"bandwidth_limit_kbit":{"type":"integer","minimum":0}}});
+}
+
+fn operations_paths(spec: &mut Value) {
+    for (path, methods) in [
+        ("/healthz", &["get"][..]),
+        ("/readyz", &["get"][..]),
+        ("/metrics", &["get"][..]),
+        ("/api/v3/iam/user", &["get", "post"][..]),
+        ("/api/v3/iam/user/{name}", &["get", "put", "delete"][..]),
+        ("/api/v3/iam/user/{name}/policy", &["put"][..]),
+        ("/api/v3/iam/user/{name}/revoke", &["put"][..]),
+        ("/api/v3/iam/signing-key/rotate", &["put"][..]),
+        ("/api/v3/zone", &["get", "post"][..]),
+        ("/api/v3/zone/{id}", &["get", "put", "delete"][..]),
+        ("/api/v3/metrics", &["get", "post"][..]),
+        ("/api/v3/log", &["get"][..]),
+        ("/api/v3/events", &["post"][..]),
+        ("/api/v3/events/log", &["post"][..]),
+        ("/api/v3/events/process", &["post"][..]),
+        ("/api/v3/events/media/{kind}", &["post"][..]),
+        ("/api/v3/resources", &["get"][..]),
+        ("/api/v3/audit", &["get"][..]),
+    ] {
+        let parameters: Vec<_> = ["name", "id", "kind"]
+            .into_iter()
+            .filter(|name| path.contains(&format!("{{{name}}}")))
+            .map(|name| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}}))
+            .collect();
+        for method in methods {
+            let mut operation = json!({
+                "tags":["Operations and IAM"],"parameters":parameters,
+                "security":if matches!(path,"/healthz"|"/readyz") {json!([])} else {json!([{"bearer":[]}])},
+                "responses":{"200":{"description":"Operation completed"},
+                    "400":error(),"401":error(),"403":error(),"404":error(),"409":error(),"503":error()}
+            });
+            let schema = match (path, *method) {
+                ("/api/v3/iam/user", "post") | ("/api/v3/iam/user/{name}", "put") => {
+                    Some("IdentityWrite")
+                }
+                ("/api/v3/iam/user/{name}/policy", "put") => Some("IdentityPolicies"),
+                ("/api/v3/zone", "post") | ("/api/v3/zone/{id}", "put") => Some("ZoneWrite"),
+                ("/api/v3/metrics", "post") => Some("MetricsQuery"),
+                _ => None,
+            };
+            if let Some(schema) = schema {
+                operation["requestBody"] = json!({"required":true,"content":{"application/json":
+                    {"schema":{"$ref":format!("#/components/schemas/{schema}")}}}});
+            }
+            if path.starts_with("/api/v3/events") {
+                operation["responses"]["200"]["content"] = json!({
+                    "application/x-json-stream": {"schema":{"type":"string"}},
+                    "text/event-stream":{"schema":{"type":"string"}}
+                });
+            }
+            if path == "/metrics" {
+                operation["responses"]["200"]["content"] =
+                    json!({"text/plain":{"schema":{"type":"string"}}});
+            }
+            spec["paths"][path][*method] = operation;
+        }
+    }
+    let schemas = &mut spec["components"]["schemas"];
+    schemas["IdentityWrite"] = json!({"type":"object","properties":{
+        "name":{"type":"string"},"alias":{"type":"string"},"superuser":{"type":"boolean"},"active":{"type":"boolean"},
+        "policies":{"$ref":"#/components/schemas/IdentityPolicies"},
+        "auth":{"type":"object","writeOnly":true,"properties":{"api":{"type":"object",
+            "properties":{"userpass":{"type":"string","writeOnly":true,"format":"password"}}}}}
+    }});
+    schemas["IdentityPolicies"] = json!({"type":"array","maxItems":64,"items":{"type":"object",
+    "required":["domain","types","resource","actions"],"properties":{
+        "domain":{"type":"string"},"types":{"type":"array","items":{"type":"string"}},
+        "resource":{"type":"string"},"actions":{"type":"array","items":{"type":"string"}},
+        "effect":{"enum":["allow","deny"],"default":"allow"}
+    }}});
+    schemas["ZoneWrite"] = json!({"type":"object","properties":{"id":{"type":"string"},
+        "limits":{"type":"object","additionalProperties":{"type":"number","minimum":0}}}});
+    schemas["MetricsQuery"] = json!({"type":"object","properties":{
+        "timerange_sec":{"type":"integer","minimum":0},"interval_sec":{"type":"integer","minimum":0},
+        "metrics":{"type":"array","maxItems":128,"items":{"type":"object","required":["name"],
+            "properties":{"name":{"type":"string"},"labels":{"type":"object","additionalProperties":{"type":"string"}}}}}
+    }});
 }
 
 fn error() -> Value {

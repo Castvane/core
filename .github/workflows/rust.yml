@@ -1,9 +1,5 @@
 name: Rust
-on:
-  push:
-    branches: [rust]
-  pull_request:
-    branches: [rust]
+on: [push, pull_request]
 
 permissions:
   contents: read
@@ -27,4 +23,5 @@ jobs:
       - run: cargo test --locked --all-targets --all-features
       - run: bash scripts/test-media-services.sh
       - run: cargo build --locked --release
+      - run: bash scripts/test-acme.sh target/release/restreamer-core
       - run: bash scripts/smoke-test.sh target/release/restreamer-core

@@ -116,6 +116,16 @@ fn meta(key: Key, object: ObjectMeta) -> Meta {
 
 #[async_trait]
 impl Storage for S3 {
+    async fn health(&self) -> Result<(), Error> {
+        self.0
+            .list(None)
+            .next()
+            .await
+            .transpose()
+            .map_err(map_error)?;
+        Ok(())
+    }
+
     async fn stat(&self, key: &Key) -> Result<Meta, Error> {
         Ok(meta(
             key.clone(),

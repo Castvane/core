@@ -135,9 +135,31 @@ impl Options {
     }
 
     pub fn validate(&self, config: &Config) -> Result<(), Error> {
+        if config.scoped {
+            if self.input.allow.is_empty() || self.output.allow.is_empty() {
+                return Err(Error::Forbidden(
+                    "delegated process editing requires FFmpeg input and output allowlists",
+                ));
+            }
+            if config
+                .inputs
+                .iter()
+                .any(|input| input.address.starts_with('#'))
+                || config.inputs.iter().chain(&config.outputs).any(|endpoint| {
+                    endpoint.address.contains('{')
+                        || !endpoint.cleanup.is_empty()
+                        || endpoint.options.iter().any(|arg| arg.contains('{'))
+                })
+                || config.options.iter().any(|arg| arg.contains('{'))
+            {
+                return Err(Error::Forbidden(
+                    "delegated processes cannot use placeholders, references or file cleanup",
+                ));
+            }
+        }
         if !valid_id(&config.id)
             || (!config.domain.is_empty() && !valid_id(&config.domain))
-            || !matches!(config.zone.as_str(), "" | "$default")
+            || !crate::zone::valid_id(crate::zone::canonical(&config.zone))
         {
             return Err(Error::Invalid("invalid process ID, domain or zone"));
         }

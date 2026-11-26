@@ -52,9 +52,12 @@ async fn serve() -> Result<(), StartupError> {
     let (filter, handle) = tracing_subscriber::reload::Layer::new(
         explicit_filter.unwrap_or_else(|| log_filter(&configured_level)),
     );
+    let json_logs = app.log_json().await?;
     tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer().with_ansi(false))
+        .with(json_logs.then(|| tracing_subscriber::fmt::layer().json().with_ansi(false)))
+        .with((!json_logs).then(|| tracing_subscriber::fmt::layer().with_ansi(false)))
+        .with(app.capture_logs())
         .init();
     if reloadable {
         app.set_reload_hook(move |level| {
@@ -66,7 +69,7 @@ async fn serve() -> Result<(), StartupError> {
     let listener = app.bind().await?;
     let tls = app.bind_tls().await?;
     let app = Arc::new(app);
-    tracing::info!(address = %listener.local_addr()?, "restreamer core listening");
+    tracing::info!(address = %listener.local_addr()?, "Castvane listening");
 
     #[cfg(unix)]
     let terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -85,25 +88,22 @@ async fn serve() -> Result<(), StartupError> {
         trigger.cancel();
     });
     let tls_task = if let Some(tls) = tls {
-        tracing::info!(address=%tls.local_addr()?.0,"restreamer core HTTPS listening");
+        tracing::info!(address=%tls.local_addr()?.0,"Castvane HTTPS listening");
         let tls_drain = drain.clone();
-        let routes = restreamer_core::router(app.clone());
-        Some(tokio::spawn(restreamer_core::serve_http(
-            tls, routes, tls_drain,
-        )))
+        Some(tokio::spawn(app.clone().serve(tls, tls_drain)))
     } else {
         None
     };
-    restreamer_core::serve_http(
-        listener.tap_io(|stream| {
-            if stream.set_nodelay(true).is_err() {
-                tracing::debug!("could not set TCP_NODELAY");
-            }
-        }),
-        restreamer_core::router(app.clone()),
-        drain.clone(),
-    )
-    .await;
+    app.clone()
+        .serve(
+            listener.tap_io(|stream| {
+                if stream.set_nodelay(true).is_err() {
+                    tracing::debug!("could not set TCP_NODELAY");
+                }
+            }),
+            drain.clone(),
+        )
+        .await;
     drain.cancel();
     signals_task.abort();
     if let Some(task) = tls_task {

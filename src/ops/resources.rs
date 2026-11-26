@@ -1,8 +1,7 @@
-use std::{
-    fs,
-    path::{Component, Path, PathBuf},
-    time::Instant,
-};
+use std::{fs, path::Path, time::Instant};
+
+#[cfg(target_os = "linux")]
+use std::path::{Component, PathBuf};
 
 use serde::Serialize;
 
@@ -41,11 +40,13 @@ pub struct Gpu {
     pub decoder: Option<f64>,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Default)]
 pub struct Sampler {
     prior: Option<Counters>,
 }
 
+#[cfg(target_os = "linux")]
 struct Counters {
     at: Instant,
     cpu: Option<(u64, u64)>,
@@ -61,6 +62,7 @@ fn number(path: impl AsRef<Path>) -> Option<u64> {
     raw(path)?.trim().parse().ok()
 }
 
+#[cfg(target_os = "linux")]
 pub fn cgroup_path(root: &Path, membership: &str) -> Option<PathBuf> {
     let relative = membership
         .lines()
@@ -76,6 +78,7 @@ pub fn cgroup_path(root: &Path, membership: &str) -> Option<PathBuf> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn ancestors_limit<T: Copy + PartialOrd>(
     root: &Path,
     group: &Path,
@@ -88,6 +91,7 @@ fn ancestors_limit<T: Copy + PartialOrd>(
         .reduce(|min, value| if value < min { value } else { min })
 }
 
+#[cfg(target_os = "linux")]
 fn cpu_quota(group: &Path) -> Option<f64> {
     let text = raw(group.join("cpu.max"))?;
     let mut fields = text.split_whitespace().map(str::parse::<u64>);
@@ -96,6 +100,7 @@ fn cpu_quota(group: &Path) -> Option<f64> {
     (quota > 0 && period > 0).then_some(quota as f64 / period as f64)
 }
 
+#[cfg(target_os = "linux")]
 fn counter(text: &str, field: &str) -> Option<u64> {
     text.lines()
         .filter_map(|line| line.split_once(char::is_whitespace))
@@ -103,6 +108,7 @@ fn counter(text: &str, field: &str) -> Option<u64> {
         .and_then(|value| value.parse().ok())
 }
 
+#[cfg(target_os = "linux")]
 fn host_cpu() -> Option<(u64, u64)> {
     let text = raw("/proc/stat")?;
     let line = text.lines().next()?.strip_prefix("cpu ")?;
@@ -118,6 +124,7 @@ fn host_cpu() -> Option<(u64, u64)> {
     Some((values.iter().copied().fold(0, u64::saturating_add), idle))
 }
 
+#[cfg(target_os = "linux")]
 fn network() -> Option<(u64, u64)> {
     let text = raw("/proc/net/dev")?;
     let mut totals = (0u64, 0u64);
@@ -133,6 +140,7 @@ fn network() -> Option<(u64, u64)> {
     Some(totals)
 }
 
+#[cfg(target_os = "linux")]
 fn cpu_topology() -> Option<usize> {
     let text = raw("/proc/cpuinfo")?;
     let mut cores = std::collections::BTreeSet::new();
@@ -150,6 +158,7 @@ fn cpu_topology() -> Option<usize> {
     (!cores.is_empty()).then_some(cores.len())
 }
 
+#[cfg(target_os = "linux")]
 fn memory() -> (Option<u64>, Option<u64>) {
     let Some(text) = raw("/proc/meminfo") else {
         return (None, None);
@@ -164,6 +173,7 @@ fn memory() -> (Option<u64>, Option<u64>) {
     (field("MemTotal"), field("MemAvailable"))
 }
 
+#[cfg(target_os = "linux")]
 impl Sampler {
     pub fn sample(&mut self, disk: &Path, gpus: Vec<Gpu>) -> Snapshot {
         let root = Path::new("/sys/fs/cgroup");
@@ -254,6 +264,86 @@ impl Sampler {
     }
 }
 
+#[cfg(windows)]
+#[derive(Default)]
+pub struct Sampler {
+    system: Option<sysinfo::System>,
+    networks: Option<sysinfo::Networks>,
+    prior: Option<Instant>,
+}
+
+#[cfg(windows)]
+impl Sampler {
+    pub fn sample(&mut self, disk: &Path, gpus: Vec<Gpu>) -> Snapshot {
+        use sysinfo::{Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, System};
+
+        let logical = std::thread::available_parallelism().map_or(1, usize::from);
+        let mut snapshot = Snapshot {
+            logical_cpus: logical,
+            effective_cpus: Some(logical as f64),
+            physical_cores: System::physical_core_count().ok(),
+            host_uptime: System::uptime().ok().map(|seconds| seconds as f64),
+            gpus,
+            ..Snapshot::default()
+        };
+        if self.system.is_none() {
+            self.system = System::new().ok();
+        }
+        if let Some(system) = &mut self.system {
+            system.refresh_cpu_usage();
+            system.refresh_memory();
+            system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+            snapshot.host_cpu_percent = self.prior.map(|_| f64::from(system.global_cpu_usage()));
+            snapshot.total_memory = Some(system.total_memory());
+            snapshot.available_memory = Some(system.available_memory());
+            snapshot.process_count = Some(system.processes().len());
+        }
+        if self.networks.is_none() {
+            self.networks = Networks::new_with_refreshed_list().ok();
+        }
+        if let Some(networks) = &mut self.networks {
+            networks.refresh(true);
+            let totals = networks
+                .values()
+                .fold((0u64, 0u64, 0u64, 0u64), |counts, net| {
+                    (
+                        counts.0.saturating_add(net.total_received()),
+                        counts.1.saturating_add(net.total_transmitted()),
+                        counts.2.saturating_add(net.received()),
+                        counts.3.saturating_add(net.transmitted()),
+                    )
+                });
+            snapshot.network_received = Some(totals.0);
+            snapshot.network_sent = Some(totals.1);
+            if let Some(prior) = self.prior {
+                let seconds = prior.elapsed().as_secs_f64().max(0.001);
+                snapshot.network_received_per_second = Some(totals.2 as f64 / seconds);
+                snapshot.network_sent_per_second = Some(totals.3 as f64 / seconds);
+            }
+        }
+        if let (Ok(path), Ok(disks)) = (fs::canonicalize(disk), Disks::new_with_refreshed_list()) {
+            let path = path.to_string_lossy();
+            let path = path.trim_start_matches(r"\\?\").to_ascii_lowercase();
+            if let Some(volume) = disks
+                .iter()
+                .filter(|volume| {
+                    path.starts_with(&volume.mount_point().to_string_lossy().to_ascii_lowercase())
+                })
+                .max_by_key(|volume| volume.mount_point().as_os_str().len())
+            {
+                snapshot.disk_bytes = Some(volume.total_space());
+                snapshot.disk_available = Some(volume.available_space());
+            }
+        }
+        self.prior = Some(Instant::now());
+        snapshot
+    }
+}
+
 pub fn discover_gpus(drm: &Path, devices: &Path) -> Vec<Gpu> {
     let mut gpu = Vec::new();
     if let Ok(entries) = fs::read_dir(drm) {
@@ -329,6 +419,7 @@ pub fn discover_gpus(drm: &Path, devices: &Path) -> Vec<Gpu> {
     gpu
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub fn parse_nvidia_csv(csv: &str) -> Vec<Gpu> {
     csv.lines()
         .take(64)
@@ -377,6 +468,7 @@ pub fn parse_nvidia_csv(csv: &str) -> Vec<Gpu> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
 pub async fn nvidia() -> Vec<Gpu> {
     use tokio::io::AsyncReadExt;
     async fn query() -> Option<Vec<Gpu>> {
@@ -409,6 +501,7 @@ pub async fn nvidia() -> Vec<Gpu> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
     #[test]
     fn cgroup_membership_is_relative_and_ancestor_limits_are_effective() {
         let root = tempfile::TempDir::new().unwrap();
@@ -426,6 +519,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     fn ancestor_limit(root: &Path, group: &Path) -> Option<f64> {
         ancestors_limit(root, group, cpu_quota)
     }
@@ -461,4 +555,9 @@ mod tests {
             start.elapsed().as_secs_f64() * 10.0
         );
     }
+}
+
+#[cfg(windows)]
+pub async fn nvidia() -> Vec<Gpu> {
+    Vec::new()
 }

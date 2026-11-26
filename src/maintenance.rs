@@ -1,6 +1,5 @@
 use std::{
     io::{self, Read},
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
@@ -320,10 +319,14 @@ fn checksum(path: &Path) -> io::Result<String> {
 }
 
 pub(crate) fn temporary_for(path: &Path) -> io::Result<NamedTempFile> {
-    Builder::new()
-        .prefix(".castvane-")
-        .permissions(std::fs::Permissions::from_mode(0o600))
-        .tempfile_in(parent(path))
+    let mut builder = Builder::new();
+    builder.prefix(".castvane-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    builder.tempfile_in(parent(path))
 }
 
 fn parent(path: &Path) -> &Path {
@@ -335,6 +338,7 @@ fn parent(path: &Path) -> &Path {
 pub(crate) fn publish(file: NamedTempFile, path: &Path) -> Result<(), StartupError> {
     file.as_file().sync_all()?;
     file.persist_noclobber(path)?;
+    #[cfg(unix)]
     std::fs::File::open(parent(path))?.sync_all()?;
     Ok(())
 }

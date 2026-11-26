@@ -330,7 +330,7 @@ impl Options {
             original.push(address.clone());
             actual.extend(opts.iter().cloned());
             actual.push(if address == "-" {
-                "/dev/null".into()
+                if cfg!(windows) { "NUL" } else { "/dev/null" }.into()
             } else {
                 address.clone()
             });
@@ -1054,6 +1054,8 @@ fn cleanup_location(options: &Options, value: &str) -> Option<(String, String)> 
         return None;
     }
     let path = path.to_str()?;
+    #[cfg(windows)]
+    let path = &path.replace('\\', "/");
     crate::media::storage::Key::parse(path).ok()?;
     Some(("disk".into(), path.into()))
 }

@@ -36,6 +36,7 @@ impl Key {
                     || part == ".."
                     || part.len() > 255
                     || part.starts_with(".core-upload-")
+                    || (cfg!(windows) && windows_reserved(part))
             })
         {
             return Err(Error::Invalid);
@@ -46,6 +47,32 @@ impl Key {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+fn windows_reserved(part: &str) -> bool {
+    if part.ends_with(['.', ' '])
+        || part.contains([':', '*', '?', '"', '<', '>', '|'])
+        || part.to_ascii_lowercase().starts_with(".core-upload-")
+    {
+        return true;
+    }
+    let stem = part
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end()
+        .to_ascii_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|suffix| {
+            matches!(
+                suffix,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
 }
 
 #[derive(Clone)]

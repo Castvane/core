@@ -2,8 +2,6 @@
 
 use std::{
     net::SocketAddr,
-    os::unix::fs::PermissionsExt,
-    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -141,11 +139,14 @@ fn synthetic(id: &str) -> Value {
     })
 }
 
-fn mock(path: &Path, script: &str) {
+#[cfg(target_os = "linux")]
+fn mock(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
     std::fs::write(path, format!("#!/bin/sh\nif [ \"$1\" = -version ]; then echo 'ffmpeg version fixture'; exit 0; fi\n{script}\n")).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
+#[cfg(target_os = "linux")]
 fn running(pid: i64) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
         .ok()
@@ -154,6 +155,15 @@ fn running(pid: i64) -> bool {
                 .map(|(_, rest)| !rest.starts_with('Z'))
         })
         .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn running(pid: i64) -> bool {
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+    let mut system = System::new().unwrap();
+    let pid = Pid::from_u32(u32::try_from(pid).unwrap());
+    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_some()
 }
 
 #[tokio::test]
@@ -471,6 +481,7 @@ async fn real_ffmpeg_ffprobe_and_restart_reconciliation() {
     server.state.close().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn failed_jobs_back_off_then_exhaust_and_missing_executables_are_reported() {
     let dir = TempDir::new().unwrap();
@@ -521,6 +532,7 @@ async fn failed_jobs_back_off_then_exhaust_and_missing_executables_are_reported(
     server.state.close().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn stall_kills_the_process_group_and_queued_work_resumes() {
     let dir = TempDir::new().unwrap();
@@ -592,6 +604,7 @@ async fn stall_kills_the_process_group_and_queued_work_resumes() {
     assert!(!running(next));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn schedules_survive_restart_and_references_are_validated() {
     let dir = TempDir::new().unwrap();
@@ -729,6 +742,7 @@ async fn four_concurrent_ffmpeg_jobs() {
     server.state.close().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn dynamic_references_reuse_the_producer_endpoint_and_cleanup_is_scoped() {
     let dir = TempDir::new().unwrap();
@@ -777,11 +791,12 @@ async fn dynamic_references_reuse_the_producer_endpoint_and_cleanup_is_scoped() 
     server
         .expect(200, "DELETE", "/api/v3/process/producer", None)
         .await;
-    assert!(!Path::new(address).exists());
+    assert!(!std::path::Path::new(address).exists());
     assert!(untouched.exists());
     server.state.close().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn standalone_core_crash_terminates_the_media_leader() {
     let dir = TempDir::new().unwrap();
@@ -845,6 +860,7 @@ async fn standalone_core_crash_terminates_the_media_leader() {
     .unwrap();
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn ffprobe_timeout_reaps_its_child_and_returns_an_api_error() {
     let dir = TempDir::new().unwrap();
@@ -881,6 +897,7 @@ async fn ffprobe_timeout_reaps_its_child_and_returns_an_api_error() {
     server.state.close().await;
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "requires a disposable delegated cgroup v2 with cpu and memory controllers"]
 async fn kernel_limits_attach_and_remove_an_ffmpeg_cgroup() {

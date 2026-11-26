@@ -132,16 +132,18 @@ impl Cluster {
         media_root: &Path,
         worker: diagnostics::Worker,
     ) -> Result<Arc<Self>, StartupError> {
-        use std::os::unix::fs::PermissionsExt;
         let database = SqliteStore(store.0.clone());
         let key_path = tokio::fs::canonicalize(&settings.private_key).await?;
+        #[cfg(unix)]
         let metadata = tokio::fs::metadata(&key_path).await?;
+        #[cfg(windows)]
+        let metadata = tokio::fs::symlink_metadata(&settings.private_key).await?;
         if !metadata.is_file()
-            || metadata.permissions().mode() & 0o077 != 0
+            || !crate::platform::private_metadata(&metadata)
             || key_path.starts_with(media_root)
         {
             return Err(
-                "cluster private key must be a mode 0600 regular file outside public media".into(),
+                "cluster private key must be a private regular file outside public media".into(),
             );
         }
         let cert = bounded_file(&settings.certificate).await?;

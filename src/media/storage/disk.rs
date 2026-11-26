@@ -50,12 +50,20 @@ fn meta(key: &Key, metadata: &Metadata) -> Result<Meta, Error> {
         .modified()
         .map(|t| t.into_std())
         .unwrap_or(UNIX_EPOCH);
+    #[cfg(unix)]
     let tag = format!(
         "\"{:x}-{:x}-{:x}-{:x}\"",
         metadata.ino(),
         metadata.len(),
         metadata.mtime(),
         metadata.mtime_nsec()
+    );
+    #[cfg(windows)]
+    let tag = format!(
+        "W/\"{:x}-{:x}-{:x}\"",
+        metadata.creation_time(),
+        metadata.last_write_time(),
+        metadata.len()
     );
     Ok(Meta {
         key: key.clone(),
@@ -83,7 +91,11 @@ impl Storage for Disk {
         let expected = expected.clone();
         let file = io(move || {
             let mut opts = OpenOptions::new();
-            opts.read(true).custom_flags(nix::libc::O_NONBLOCK);
+            opts.read(true);
+            #[cfg(unix)]
+            opts.custom_flags(nix::libc::O_NONBLOCK);
+            #[cfg(windows)]
+            opts.share_mode(0x1 | 0x2 | 0x4); // FILE_SHARE_READ, WRITE and DELETE.
             let file = root.open_with(expected.key.as_str(), &opts)?;
             if meta(&expected.key, &file.metadata()?)?.tag != expected.tag {
                 return Err(Error::Changed);
@@ -112,7 +124,9 @@ impl Storage for Disk {
             }
             let path = target.with_file_name(format!(".core-upload-{}", uuid::Uuid::new_v4()));
             let mut opts = OpenOptions::new();
-            opts.write(true).create_new(true).mode(0o600);
+            opts.write(true).create_new(true);
+            #[cfg(unix)]
+            opts.mode(0o600);
             let file = root.open_with(&path, &opts)?;
             Ok((Temp { root, path, key }, file.into_std()))
         })
@@ -179,6 +193,8 @@ impl Storage for Disk {
                     let Some(path) = local.strip_prefix(".").ok().and_then(Path::to_str) else {
                         continue;
                     };
+                    #[cfg(windows)]
+                    let path = &path.replace('\\', "/");
                     let Ok(key) = Key::parse(path) else { continue };
                     let kind = entry.file_type()?;
                     if kind.is_dir() {

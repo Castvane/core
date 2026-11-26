@@ -31,14 +31,14 @@ impl Store {
         file.write(true).create(true).truncate(false);
         #[cfg(unix)]
         file.mode(0o600);
-        let metadata = file.open(path).await?.metadata().await?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o077 != 0 {
-                return Err("database file must be private (chmod 600)".into());
-            }
+        #[cfg(windows)]
+        file.custom_flags(crate::platform::OPEN_REPARSE_POINT);
+        let opened = file.open(path).await?;
+        let metadata = opened.metadata().await?;
+        if !metadata.is_file() || !crate::platform::private_metadata(&metadata) {
+            return Err("database must be a private regular file".into());
         }
+        drop(opened);
 
         let pool = SqlitePoolOptions::new()
             .max_connections(4)

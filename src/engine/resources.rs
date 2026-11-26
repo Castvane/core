@@ -1,12 +1,24 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{path::Path, time::Instant};
 
 use crate::engine::{Limits, Usage};
 
-pub struct Cgroup(PathBuf);
+#[cfg(target_os = "linux")]
+pub struct Cgroup(std::path::PathBuf);
+#[cfg(windows)]
+pub struct Cgroup;
 
+#[cfg(windows)]
+impl Cgroup {
+    pub async fn attach(_: Option<&Path>, _: u32, _: &Limits) -> Option<Self> {
+        None
+    }
+
+    pub async fn cleanup(self) -> bool {
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
 impl Cgroup {
     pub async fn attach(root: Option<&Path>, pid: u32, limits: &Limits) -> Option<Self> {
         let root = root?;
@@ -75,40 +87,16 @@ pub struct Monitor {
 
 impl Monitor {
     pub async fn sample(&mut self, pid: u32, usage: &mut Usage) -> bool {
-        let stat = tokio::fs::read_to_string(format!("/proc/{pid}/stat")).await;
-        let status = tokio::fs::read_to_string(format!("/proc/{pid}/status")).await;
-        let (Ok(stat), Ok(status)) = (stat, status) else {
+        let Some((total, memory, clock)) = process_usage(pid).await else {
             return false;
         };
-        let Some((_, fields)) = stat.rsplit_once(')') else {
-            return false;
-        };
-        let mut words = fields.split_whitespace();
-        let Some(user) = words.nth(11).and_then(|word| word.parse::<u64>().ok()) else {
-            return false;
-        };
-        let Some(system) = words.next().and_then(|word| word.parse::<u64>().ok()) else {
-            return false;
-        };
-        let total = user.saturating_add(system);
         let now = Instant::now();
-        let clock = nix::unistd::sysconf(nix::unistd::SysconfVar::CLK_TCK)
-            .ok()
-            .flatten()
-            .unwrap_or(100);
         let cpu_sampled = self.previous.is_some();
         if let Some((prev, then)) = self.previous {
             usage.cpu = (total.saturating_sub(prev) as f64 * 100.0)
-                / (clock as f64 * now.duration_since(then).as_secs_f64().max(0.001));
+                / (clock * now.duration_since(then).as_secs_f64().max(0.001));
             usage.cpu_peak = usage.cpu_peak.max(usage.cpu);
         }
-        let memory = status
-            .lines()
-            .find_map(|line| line.strip_prefix("VmRSS:"))
-            .and_then(|rest| rest.split_whitespace().next())
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(0)
-            .saturating_mul(1024);
         usage.memory = memory;
         usage.memory_peak = usage.memory_peak.max(memory);
         usage.samples += 1;
@@ -133,4 +121,49 @@ impl Monitor {
             false
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn process_usage(pid: u32) -> Option<(u64, u64, f64)> {
+    let stat = tokio::fs::read_to_string(format!("/proc/{pid}/stat")).await;
+    let status = tokio::fs::read_to_string(format!("/proc/{pid}/status")).await;
+    let (Ok(stat), Ok(status)) = (stat, status) else {
+        return None;
+    };
+    let (_, fields) = stat.rsplit_once(')')?;
+    let mut words = fields.split_whitespace();
+    let user = words.nth(11)?.parse::<u64>().ok()?;
+    let system = words.next()?.parse::<u64>().ok()?;
+    let total = user.saturating_add(system);
+    let memory = status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmRSS:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+        .saturating_mul(1024);
+    let clock = nix::unistd::sysconf(nix::unistd::SysconfVar::CLK_TCK)
+        .ok()
+        .flatten()
+        .unwrap_or(100);
+    Some((total, memory, clock as f64))
+}
+
+#[cfg(windows)]
+async fn process_usage(pid: u32) -> Option<(u64, u64, f64)> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    tokio::task::spawn_blocking(move || {
+        let mut system = System::new().ok()?;
+        let pid = Pid::from_u32(pid);
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory(),
+        );
+        let process = system.process(pid)?;
+        Some((process.accumulated_cpu_time(), process.memory(), 1000.0))
+    })
+    .await
+    .ok()
+    .flatten()
 }

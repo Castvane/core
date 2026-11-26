@@ -4,7 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nix::sys::signal::Signal;
 use regex::Regex;
 use tokio::{
     process::Child,
@@ -292,7 +291,7 @@ impl Supervisor {
         {
             return Exit::failed("cluster ownership lease expired");
         }
-        let Ok((mut child, group)) =
+        let Ok((mut child, mut group)) =
             launch(&options.ffmpeg, &command.args, options.launcher.as_deref())
         else {
             let mut runtime = lock(state);
@@ -370,12 +369,12 @@ impl Supervisor {
                 biased;
                 _ = wake(updates, &mut self.shutdown) => {
                     let reason = if *self.shutdown.borrow() { "application shutdown".into() } else { updates.borrow().reason.clone() };
-                    break terminate(state, &mut child, &group, if self.gate.is_some() { 1 } else { options.stop_timeout }, reason, true).await;
+                    break terminate(state, &mut child, &mut group, if self.gate.is_some() { 1 } else { options.stop_timeout }, reason, true).await;
                 }
                 status = child.wait() => break Exit::natural(status),
                 _ = sample.tick() => {
                     if self.gate.as_ref().is_some_and(|gate| !gate.allows(config)) {
-                        break terminate(state, &mut child, &group, 1, "cluster ownership lease expired".into(), true).await;
+                        break terminate(state, &mut child, &mut group, 1, "cluster ownership lease expired".into(), true).await;
                     }
                     cleanup_ticks += 1;
                     if cleanup_ticks >= 30 && let Some(graph) = self.graph.upgrade() {
@@ -394,14 +393,14 @@ impl Supervisor {
                         Some(("sampled resource limit exceeded", false))
                     } else { None };
                     if let Some((reason, normal)) = reason {
-                        let mut exit = terminate(state, &mut child, &group, options.stop_timeout, reason.into(), false).await;
+                        let mut exit = terminate(state, &mut child, &mut group, options.stop_timeout, reason.into(), false).await;
                         if !normal && exit.state == Execution::Finished { exit.state = Execution::Failed; }
                         break exit;
                     }
                 }
             }
         };
-        group.signal(Signal::SIGKILL);
+        group.kill();
         if options.launcher.is_some() && exit.code == Some(126) && !exit.interrupted {
             exit.reason = "configured FFmpeg executable could not start".into();
         }
@@ -483,12 +482,16 @@ impl Exit {
                 interrupted: false,
             }
         } else {
+            #[cfg(target_os = "linux")]
             use std::os::unix::process::ExitStatusExt;
+            #[cfg(target_os = "linux")]
             let state = if status.signal().is_some() {
                 Execution::Killed
             } else {
                 Execution::Failed
             };
+            #[cfg(windows)]
+            let state = Execution::Failed;
             Self {
                 state,
                 reason: "FFmpeg exited unexpectedly".into(),
@@ -502,13 +505,13 @@ impl Exit {
 async fn terminate(
     state: &Arc<Mutex<Runtime>>,
     child: &mut Child,
-    group: &Group,
+    group: &mut Group,
     timeout: u64,
     reason: Arc<str>,
     interrupted: bool,
 ) -> Exit {
     lock(state).execution = Execution::Finishing;
-    group.signal(Signal::SIGTERM);
+    group.stop();
     match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
         Ok(Ok(status)) => Exit {
             state: Execution::Finished,
@@ -521,7 +524,7 @@ async fn terminate(
             ..Exit::failed(reason)
         },
         Err(_) => {
-            group.signal(Signal::SIGKILL);
+            group.kill();
             let _ = child.wait().await;
             Exit {
                 state: Execution::Killed,

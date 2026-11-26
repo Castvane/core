@@ -556,7 +556,9 @@ async fn discovery(
 
 fn build_arch() -> &'static str {
     match std::env::consts::ARCH {
+        "x86_64" if cfg!(windows) => "windows/amd64",
         "x86_64" => "linux/amd64",
+        "aarch64" if cfg!(windows) => "windows/arm64",
         "aarch64" => "linux/arm64",
         other => other,
     }

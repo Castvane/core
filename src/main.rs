@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use std::{ffi::OsString, os::unix::process::CommandExt, sync::Arc};
+use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use std::{ffi::OsString, os::unix::process::CommandExt};
 
 mod cli;
 
@@ -10,14 +12,8 @@ use restreamer_core::{App, StartupError, config::Environment};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn main() -> Result<(), StartupError> {
-    let mut args = std::env::args_os().skip(1);
-    if args.next().as_deref() == Some(std::ffi::OsStr::new("__media_child")) {
-        if media_child(args).is_err() {
-            eprintln!("configured media executable could not start");
-            std::process::exit(126);
-        }
-        return Ok(());
-    }
+    #[cfg(target_os = "linux")]
+    launch_media_if_requested();
     let cli = cli::Cli::parse();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -25,6 +21,18 @@ fn main() -> Result<(), StartupError> {
         .block_on(cli::run(cli.command))
 }
 
+#[cfg(target_os = "linux")]
+fn launch_media_if_requested() {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() == Some(std::ffi::OsStr::new("__media_child"))
+        && media_child(args).is_err()
+    {
+        eprintln!("configured media executable could not start");
+        std::process::exit(126);
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn media_child(mut args: impl Iterator<Item = OsString>) -> Result<(), StartupError> {
     use nix::{
         sys::{prctl, signal::Signal},
@@ -48,7 +56,9 @@ fn media_child(mut args: impl Iterator<Item = OsString>) -> Result<(), StartupEr
 }
 
 async fn serve() -> Result<(), StartupError> {
-    let environment = Environment::read()?.with_media_launcher(std::env::current_exe()?);
+    let environment = Environment::read()?;
+    #[cfg(target_os = "linux")]
+    let environment = environment.with_media_launcher(std::env::current_exe()?);
     let mut app = App::open(environment).await?;
     let configured_level = app.log_level().await?;
     let explicit_filter = EnvFilter::try_from_default_env().ok();
@@ -80,8 +90,8 @@ async fn serve() -> Result<(), StartupError> {
 
     #[cfg(unix)]
     let shutdown = shutdown(terminate);
-    #[cfg(not(unix))]
-    let shutdown = shutdown();
+    #[cfg(windows)]
+    let shutdown = shutdown(tokio::signal::windows::ctrl_break()?);
 
     let signals = app.clone();
     let drain = tokio_util::sync::CancellationToken::new();
@@ -129,10 +139,15 @@ async fn shutdown(mut terminate: tokio::signal::unix::Signal) {
     }
 }
 
-#[cfg(not(unix))]
-async fn shutdown() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown");
+#[cfg(windows)]
+async fn shutdown(mut ctrl_break: tokio::signal::windows::CtrlBreak) {
+    tokio::select! {
+        _ = ctrl_break.recv() => {}
+        result = tokio::signal::ctrl_c() => {
+            if let Err(error) = result {
+                tracing::error!(%error, "failed to listen for interrupt");
+            }
+        }
     }
 }
 

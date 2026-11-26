@@ -16,6 +16,7 @@ mod zone;
 pub use http_server::serve_http;
 mod media;
 mod persistence;
+mod platform;
 mod state;
 mod tls;
 pub use tls::TlsPeer;

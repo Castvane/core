@@ -116,7 +116,7 @@ pub struct Transport {
     policy: Arc<Policy>,
     srt_passphrase: String,
     flv: Option<String>,
-    child: tokio::sync::Mutex<Child>,
+    child: tokio::sync::Mutex<(Child, crate::engine::executable::Group)>,
     _dir: tempfile::TempDir,
     stop: CancellationToken,
 }
@@ -252,23 +252,12 @@ impl Transport {
             program.to_owned()
         };
         let launcher = launcher.map(|path| working_directory.join(path));
-        let mut command = tokio::process::Command::new(launcher.as_deref().unwrap_or(&program));
-        if launcher.is_some() {
-            command
-                .arg("__media_child")
-                .arg(std::process::id().to_string())
-                .arg(program);
-        }
+        let mut command = crate::engine::executable::command(&program, launcher.as_deref());
         command
             .arg(path)
             .current_dir(dir.path())
-            .env_clear()
-            .env("PATH", "/usr/local/bin:/usr/bin:/bin")
-            .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .process_group(0);
+            .stderr(Stdio::null());
         let stop = CancellationToken::new();
         let shutdown = stop.clone().drop_guard();
         let callback_app = Router::new()
@@ -281,7 +270,8 @@ impl Transport {
                 .await;
         });
         drop(reserved);
-        let mut child = command.spawn().map_err(|_| Error::Unavailable)?;
+        let (mut child, group) =
+            crate::engine::executable::spawn(&mut command).map_err(|_| Error::Unavailable)?;
         let deadline = Instant::now() + Duration::from_secs(8);
         let mut started = false;
         while Instant::now() < deadline {
@@ -336,7 +326,7 @@ impl Transport {
             policy,
             srt_passphrase,
             flv,
-            child: tokio::sync::Mutex::new(child),
+            child: tokio::sync::Mutex::new((child, group)),
             _dir: dir,
             stop,
         }))
@@ -483,18 +473,15 @@ impl Transport {
 
     pub async fn close(&self) {
         self.stop.cancel();
-        let mut child = self.child.lock().await;
-        if let Some(id) = child.id().and_then(|id| i32::try_from(id).ok()) {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(id),
-                nix::sys::signal::Signal::SIGTERM,
-            );
-        }
+        let mut managed = self.child.lock().await;
+        let (child, group) = &mut *managed;
+        group.stop();
         if tokio::time::timeout(Duration::from_secs(3), child.wait())
             .await
             .is_err()
         {
-            let _ = child.kill().await;
+            group.kill();
+            let _ = child.wait().await;
         }
     }
 }

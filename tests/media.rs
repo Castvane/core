@@ -216,11 +216,15 @@ async fn disk_http_range_head_alias_and_interrupted_atomic_publication() {
             .await[0]["name"],
         "/live/part.ts"
     );
-    std::os::unix::fs::symlink("/etc/passwd", dir.path().join("files/cannot-read.txt")).unwrap();
-    let no = fixture
-        .request("GET", "/cannot-read.txt", &[], Body::empty())
-        .await;
-    assert!(!no.status().is_success());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/etc/passwd", dir.path().join("files/cannot-read.txt"))
+            .unwrap();
+        let no = fixture
+            .request("GET", "/cannot-read.txt", &[], Body::empty())
+            .await;
+        assert!(!no.status().is_success());
+    }
     assert_eq!(
         fixture
             .request("GET", "/live/%2e%2e/part.ts", &[], Body::empty())

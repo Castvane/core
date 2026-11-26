@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
     fmt,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, RwLock,
@@ -286,10 +285,12 @@ impl Acme {
 
     async fn prepare(&self) -> Result<(), StartupError> {
         let mut builder = tokio::fs::DirBuilder::new();
-        builder.recursive(true).mode(0o700);
+        builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o700);
         builder.create(&self.folder).await?;
         let metadata = tokio::fs::symlink_metadata(&self.folder).await?;
-        if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
+        if !metadata.is_dir() || !crate::platform::private_metadata(&metadata) {
             return Err("ACME storage must be a private directory (chmod 700)".into());
         }
         Ok(())
@@ -420,17 +421,25 @@ fn valid_hostname(name: &str) -> bool {
         })
 }
 
-type Revision = Option<(u64, i64, i64, u64)>;
+type Revision = Option<(
+    Option<std::time::SystemTime>,
+    Option<std::time::SystemTime>,
+    u64,
+    u64,
+)>;
 
 async fn fingerprint(chain: &Path, key: &Path) -> (Revision, Revision) {
     async fn version(path: &Path) -> Revision {
-        use std::os::unix::fs::MetadataExt;
         let metadata = tokio::fs::metadata(path).await.ok()?;
+        #[cfg(unix)]
+        let identity = std::os::unix::fs::MetadataExt::ino(&metadata);
+        #[cfg(windows)]
+        let identity = std::os::windows::fs::MetadataExt::creation_time(&metadata);
         Some((
-            metadata.ino(),
-            metadata.mtime(),
-            metadata.mtime_nsec(),
+            metadata.modified().ok(),
+            metadata.created().ok(),
             metadata.len(),
+            identity,
         ))
     }
     (version(chain).await, version(key).await)
@@ -441,18 +450,24 @@ fn renewal_due(expiry: Option<i64>, now: i64, window: i64) -> bool {
 }
 
 async fn read(path: &Path, private: bool) -> Result<Vec<u8>, StartupError> {
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
     // Opening the configured path with O_NOFOLLOW for secrets prevents accepting
     // a symlink to publicly readable PEM data.
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     if private {
+        #[cfg(unix)]
         options.custom_flags(nix::libc::O_NOFOLLOW);
+        #[cfg(windows)]
+        options.custom_flags(crate::platform::OPEN_REPARSE_POINT);
     }
     let path = path.to_path_buf();
     let file = tokio::task::spawn_blocking(move || options.open(path)).await??;
     let metadata = file.metadata()?;
-    if !metadata.is_file() || (private && metadata.permissions().mode() & 0o077 != 0) {
+    if !metadata.is_file() || (private && !crate::platform::private_metadata(&metadata)) {
         return Err("invalid TLS or ACME file permissions".into());
     }
     let mut data = Vec::new();

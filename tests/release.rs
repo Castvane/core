@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, sync::Arc};
+use std::{net::SocketAddr, path::Path, sync::Arc};
 
 use axum::{
     body::{Body, to_bytes},
@@ -248,6 +248,9 @@ async fn consistent_live_backup_with_integrity_and_no_overwrite() {
         200
     );
     let checksum = maintenance::backup(&source, &output).await.unwrap();
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(&output).unwrap().permissions().mode() & 0o777,
         0o600

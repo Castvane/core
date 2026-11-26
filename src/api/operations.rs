@@ -104,8 +104,11 @@ async fn readiness(State(app): State<Arc<App>>) -> impl IntoResponse {
             .as_ref()
             .is_some_and(|transport| transport.metrics().available)
     });
+    let cluster = app.cluster.as_ref().map(|cluster| cluster.readiness());
+    let ffmpeg_required = cluster.is_none_or(|(_, runs_media)| runs_media);
     let ready = db
-        && ffmpeg
+        && cluster.is_none_or(|(joined, _)| joined)
+        && (!ffmpeg_required || ffmpeg)
         && storage
         && tls
         && (!app.media.transport_required || native == Some(true))
@@ -117,7 +120,7 @@ async fn readiness(State(app): State<Arc<App>>) -> impl IntoResponse {
             StatusCode::SERVICE_UNAVAILABLE
         },
         Json(
-            json!({"status":if ready {"ok"} else {"unavailable"},"database":db,"ffmpeg":ffmpeg,"required_storage":storage,"tls":tls,"native_media":native}),
+            json!({"status":if ready {"ok"} else {"unavailable"},"database":db,"ffmpeg":ffmpeg,"ffmpeg_required":ffmpeg_required,"required_storage":storage,"tls":tls,"native_media":native,"cluster_joined":cluster.map(|(joined, _)| joined)}),
         ),
     )
 }
@@ -190,7 +193,7 @@ async fn describe(State(app): State<Arc<App>>) -> Reply {
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
-struct Query {
+pub(super) struct Query {
     timerange_sec: u64,
     interval_sec: u64,
     metrics: Vec<QueryMetric>,
@@ -204,8 +207,12 @@ struct QueryMetric {
 }
 
 async fn metrics(State(app): State<Arc<App>>, query: Result<Json<Query>, JsonRejection>) -> Reply {
-    enabled(&app, "enable").await?;
     let Json(query) = query.map_err(|_| ApiError::bad_request("invalid metrics query"))?;
+    metrics_query(&app, query).await
+}
+
+pub(super) async fn metrics_query(app: &App, query: Query) -> Reply {
+    enabled(app, "enable").await?;
     if query.metrics.len() > 128
         || query
             .metrics
@@ -306,12 +313,16 @@ async fn metrics(State(app): State<Arc<App>>, query: Result<Json<Query>, JsonRej
 async fn log(State(app): State<Arc<App>>, request: Request) -> Reply {
     let raw = super::media::query(&request, "format").as_deref() == Some("raw");
     let component = super::media::query(&request, "component");
-    let records = app.ops.records().into_iter().filter(|event| {
-        component
-            .as_deref()
-            .is_none_or(|comp| comp == event.category)
-    });
-    let result: Vec<_> = if raw {
+    Ok(Json(json!(log_lines(&app, raw, component.as_deref()))))
+}
+
+pub(super) fn log_lines(app: &App, raw: bool, component: Option<&str>) -> Vec<Value> {
+    let records = app
+        .ops
+        .records()
+        .into_iter()
+        .filter(|event| component.is_none_or(|comp| comp == event.category));
+    if raw {
         records.map(|event| {
             let timestamp = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(event.ts) * 1_000_000)
                 .ok().and_then(|timestamp| timestamp.format(&time::format_description::well_known::Rfc3339).ok());
@@ -329,8 +340,7 @@ async fn log(State(app): State<Arc<App>>, request: Request) -> Reply {
                 ))
             })
             .collect()
-    };
-    Ok(Json(json!(result)))
+    }
 }
 
 fn event_text(event: &Event) -> &str {

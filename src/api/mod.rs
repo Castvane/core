@@ -1,6 +1,7 @@
 mod cluster;
 mod dto;
 mod error;
+mod graph;
 mod identity;
 pub(crate) mod media;
 pub(crate) mod media_http;
@@ -55,6 +56,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/swagger/", get(openapi::redirect))
         .route("/api/swagger/index.html", get(openapi::index))
         .route("/api/swagger/doc.json", get(openapi::document))
+        .route("/api/swagger/openapi.json", get(openapi::download))
+        .merge(graph::routes())
         .route_layer(middleware::from_fn_with_state(app.clone(), authorize));
     Router::new()
         .route(
@@ -319,7 +322,8 @@ async fn authorize(
         || path.starts_with("/api/v3/report")
         || path.starts_with("/api/v3/skills");
     let reload = path.ends_with("/config/reload");
-    let read_post = path == "/api/v3/metrics" || path.starts_with("/api/v3/events");
+    let read_post = matches!(path, "/api/v3/metrics" | "/api/graph/query")
+        || path.starts_with("/api/v3/events");
     let write = (matches!(
         *request.method(),
         Method::PUT | Method::POST | Method::DELETE
@@ -413,7 +417,7 @@ fn managed_route(
         return false;
     }
     let Some(path) = path.strip_prefix("/api/v3/") else {
-        return path.starts_with("/api/swagger");
+        return path.starts_with("/api/swagger") || path.starts_with("/api/graph");
     };
     let domain = media::query_uri(uri, "domain").unwrap_or_default();
     let action = if write { "write" } else { "read" };
@@ -518,14 +522,10 @@ async fn discovery(
                 concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".0.0")
             },
             build: full.then_some(dto::Build {
-                repository_commit: option_env!("GITHUB_SHA").unwrap_or(""),
+                repository_commit: env!("CASTVANE_BUILD_COMMIT"),
                 repository_branch: option_env!("GITHUB_REF_NAME").unwrap_or("development"),
                 build_date: "",
-                arch: match std::env::consts::ARCH {
-                    "x86_64" => "linux/amd64",
-                    "aarch64" => "linux/arm64",
-                    other => other,
-                },
+                arch: build_arch(),
                 compiler: "rustc",
             }),
         },
@@ -540,6 +540,14 @@ async fn discovery(
             clustering: app.cluster.is_some(),
         },
     }))
+}
+
+fn build_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "linux/amd64",
+        "aarch64" => "linux/arm64",
+        other => other,
+    }
 }
 
 async fn login(

@@ -131,6 +131,8 @@ class Node:
             "CORE_HOST_AUTO": "false",
             "RUST_LOG": "warn,openraft=error",
         }
+        if self.id == 1:
+            environment["CORE_FFMPEG_BINARY"] = "/nonexistent/castvane-fixture-ffmpeg"
         with (self.directory / "output.log").open("ab") as log:
             self.process = subprocess.Popen([self.binary], cwd=self.directory, env=environment,
                                             stdout=log, stderr=log)
@@ -191,7 +193,7 @@ def media_running(node, owner=None):
             and (owner is None or value["assignment"]["node"] == owner) and value)
 
 
-def exercise(binary, root):
+def exercise(binary, root, upgrade_from=None):
     ids = (1, 2, 3, 4)
     certificates(root, ids)
     assigned_ports = ports(8)
@@ -208,7 +210,7 @@ def exercise(binary, root):
             for node in ids
         }
     cohort = {
-        node: Node(binary, root, node, api, {
+        node: Node(upgrade_from or binary, root, node, api, {
             "cluster": "fixture", "id": node, "bind": f"127.0.0.1:{raft}", "lease_ms": 8000,
             "peers": peer_list(node), "bootstrap": [1, 2, 3] if node == 1 else [],
             "certificate": str(root / f"{node}.pem"), "private_key": str(root / f"{node}.key"),
@@ -225,6 +227,21 @@ def exercise(binary, root):
             node.start()
         leader_node = eventually(leader, "Raft did not elect a quorum-backed leader")
         assert leader_node.request("GET", "/api/v3/cluster", auth=False)[0] in (401, 403)
+        if upgrade_from is not None:
+            leader_node.call("PUT", "/db/kv/pre-upgrade", {"value": "retained"})
+            for voter in (2, 3, 1, 4):
+                member = cohort[voter]
+                member.stop()
+                member.binary = binary
+                member.start()
+                leader_node = eventually(leader, "no quorum after rolling upgrade")
+                assert leader_node.call("GET", "/db/kv/pre-upgrade")["value"] == "retained"
+            print("Rolling upgrade retained the committed record.", flush=True)
+
+        def control_readiness():
+            code, body = cohort[1].request("GET", "/readyz", auth=False)
+            return code == 200 and body["cluster_joined"] is True and body["ffmpeg_required"] is False and body["ffmpeg"] is False
+        eventually(control_readiness, "control-only voter incorrectly requires FFmpeg")
 
         context = ssl.create_default_context(cafile=str(root / "ca.pem"))
         try:
@@ -334,7 +351,20 @@ def exercise(binary, root):
         remaining_voter = next(node for node in (1, 3) if node != replacement_leader.id)
         cohort[remaining_voter].stop(crash=True)
         replacement_leader.call("PUT", "/db/kv/blocked", {"value": True}, expected=503)
-        cohort[remaining_voter].start()
+        replay = cohort[remaining_voter]
+        state_dir = replay.directory
+        database = state_dir / "core.sqlite"
+        archive = state_dir / "member-backup.sqlite"
+        retired = state_dir / "retired-data"
+        retired.mkdir()
+        environment = {**os.environ, "CORE_DATABASE_PATH": str(database)}
+        checksum = subprocess.check_output([binary, "backup", archive], env=environment, text=True).strip()
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            file = state_dir / (database.name + suffix)
+            if file.exists():
+                file.rename(retired / file.name)
+        subprocess.run([binary, "restore", archive, "--sha256", checksum], env=environment, check=True)
+        replay.start()
         recovered = eventually(leader, "restarted voter did not restore quorum")
         assert recovered.call("GET", "/db/kv/checkpoint-71")["value"] == 71
         recovered.call("PUT", "/process/video/command", {"command": "stop"})
@@ -358,6 +388,7 @@ def exercise(binary, root):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
+    parser.add_argument("--upgrade-from", type=Path, help="start from the given prior version and upgrade voters sequentially")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="castvane-cluster-") as work:
-        exercise(args.binary.resolve(strict=True), Path(work))
+        exercise(args.binary.resolve(strict=True), Path(work), args.upgrade_from.resolve(strict=True) if args.upgrade_from else None)

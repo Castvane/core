@@ -1,0 +1,32 @@
+[Unit]
+Description=Castvane Core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=castvane
+Group=castvane
+StateDirectory=castvane
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/castvane
+Environment=CORE_BIND_ADDR=127.0.0.1:8080
+Environment=CORE_DATABASE_PATH=/var/lib/castvane/core.sqlite3
+Environment=CORE_STORAGE_DISK_DIR=/var/lib/castvane/media
+EnvironmentFile=/etc/castvane/service.env
+ExecStart=/usr/local/bin/restreamer-core serve
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+TimeoutStopSec=20s
+KillMode=mixed
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

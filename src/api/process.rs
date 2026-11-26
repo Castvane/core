@@ -66,15 +66,15 @@ type QueryArgs = Result<Query<Params>, QueryRejection>;
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
-struct Params {
+pub(super) struct Params {
     domain: String,
-    filter: String,
+    pub filter: String,
     id: String,
     reference: String,
-    idpattern: String,
-    refpattern: String,
+    pub idpattern: String,
+    pub refpattern: String,
     ownerpattern: String,
-    domainpattern: String,
+    pub domainpattern: String,
     zonepattern: String,
     created_at: String,
     exited_at: String,
@@ -88,6 +88,21 @@ struct Params {
 }
 
 impl Params {
+    pub(super) fn graph(
+        filter: String,
+        idpattern: String,
+        refpattern: String,
+        domainpattern: String,
+    ) -> Self {
+        Self {
+            filter,
+            idpattern,
+            refpattern,
+            domainpattern,
+            ..Self::default()
+        }
+    }
+
     fn key(&self, id: String) -> Key {
         (self.domain.clone(), id)
     }
@@ -297,8 +312,16 @@ async fn list(
     Extension(actor): Extension<Identity>,
     args: QueryArgs,
 ) -> Response {
-    let params = query(args)?;
-    let (_, settings) = super::read_settings(&app).await?;
+    process_list(&app, &actor, query(args)?, 16 * 1024 * 1024).await
+}
+
+pub(super) async fn process_list(
+    app: &App,
+    actor: &Identity,
+    params: Params,
+    limit: usize,
+) -> Response {
+    let (_, settings) = super::read_settings(app).await?;
     let mut items = Vec::new();
     let mut used = 0;
     let entries = app.processes.list().await;
@@ -312,9 +335,9 @@ async fn list(
         .skip(params.offset)
         .take(params.limit.unwrap_or(engine::MAX_JOBS))
     {
-        let item = process_view(&app, &entry, &params, &settings.id).await?;
+        let item = process_view(app, &entry, &params, &settings.id).await?;
         used += item.to_string().len();
-        if used > 16 * 1024 * 1024 {
+        if used > limit {
             return Err(ApiError::Http(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "use a process filter or pagination for this response",
@@ -325,7 +348,7 @@ async fn list(
     Ok(Json(json!(items)))
 }
 
-async fn process_view(
+pub(super) async fn process_view(
     app: &App,
     entry: &Entry,
     params: &Params,

@@ -137,7 +137,7 @@ async fn insert_report(tx: &mut sqlx::SqliteConnection, uid: &str, run: &Run) ->
     Ok(())
 }
 
-async fn write_metadata(
+pub(crate) async fn write_metadata(
     tx: &mut sqlx::SqliteConnection,
     uid: Option<&str>,
     key: &str,

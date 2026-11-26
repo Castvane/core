@@ -290,6 +290,22 @@ impl Cluster {
         }))
     }
 
+    pub fn readiness(&self) -> (bool, bool) {
+        let metrics = self.raft.metrics();
+        let metrics = metrics.borrow();
+        let joined = metrics.current_leader.is_some()
+            && metrics
+                .membership_config
+                .membership()
+                .get_node(&self.id)
+                .is_some();
+        let runs_media = self
+            .peers
+            .get(&self.id)
+            .is_some_and(|node| node.node.role != Role::Control);
+        (joined, runs_media)
+    }
+
     pub async fn close(&self) {
         self.stop.cancel();
         let _ = self.raft.shutdown().await;

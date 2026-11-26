@@ -104,3 +104,15 @@ bash scripts/test-differential.sh /path/to/pinned/go/core target/release/restrea
 ```
 
 The follow-up suite passed 75 checks across discovery, configuration, process control, storage, IAM, zones, event stream negotiation and the process-state metric descriptor.
+
+## Phase 6 documentation and GraphQL
+
+| Method and path | Request and access | Result |
+| --- | --- | --- |
+| GET `/api/swagger/openapi.json` | Same API access policy as the existing Swagger document | OpenAPI 3.1 JSON with attachment disposition |
+| GET `/api/graph` | API access, no parameters | Local HTML index |
+| GET `/api/graph/schema.graphql` | API access, no parameters | Independently registered schema in SDL |
+| POST `/api/graph/query` | JSON `query` string, optional `variables` and `operationName`. Access JWT with identity policy when configured | JSON GraphQL response. HTTP 400 malformed request, 401/403 authorization, 408 deadline, 413 size, and bounded execution errors |
+| GET `/readyz` | Readiness probe, no credentials | HTTP 200 or 503. Cluster readiness checks local membership/leader observation. Control-only members can be ready without FFmpeg. Use authenticated cluster health for a quorum-backed test. |
+
+The pinned Go GraphQL POST rejected authenticated JSON requests with HTTP 400 and `transport not supported`. Castvane implements the GraphQL query transport and schema behavior described in the [GraphQL guide](GRAPHQL.md). For current REST endpoint families and client-visible limitations, use the phase-specific contracts linked above and the [release backlog](PHASE_6_STATUS.md).

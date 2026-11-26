@@ -96,6 +96,8 @@ def main():
         "README.md": ROOT / "README.md", "IMPLEMENTATION_PLAN.md": ROOT / "IMPLEMENTATION_PLAN.md",
         "examples/castvane.env": ROOT / "examples/castvane.env",
     }
+    for filename in ("THIRD_PARTY_NOTICES.md", "CHANGELOG.md"):
+        artifact_paths[filename] = ROOT / filename
     for document in (ROOT / "docs").glob("*.md"):
         artifact_paths[f"docs/{document.name}"] = document
     for key, package in packages.items():
@@ -129,6 +131,12 @@ def main():
             subprocess.run(["gzip", "-n", "-c", tar_path], stdout=output, check=True)
         (work / archive.name).replace(archive)
     (args.output / f"{archive.name}.sha256").write_text(f"{file_hash(archive)}  {archive.name}\n")
+    (args.output / "core.bom.cdx.json").write_text(json.dumps(bom, indent=2) + "\n")
+    (args.output / "native-build.json").write_text(json.dumps({
+        "version": version, "target": target, "commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "archive": archive.name, "sha256": file_hash(archive), "binary_sha256": file_hash(binary),
+    }, indent=2) + "\n")
     print(archive)
 
 

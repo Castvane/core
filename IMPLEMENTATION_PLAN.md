@@ -46,19 +46,19 @@ Implement process CRUD, desired versus observed state, start/stop/restart, probi
 
 The Rust media service integrates disk, memory and S3 mounts with HTTP delivery, HLS/DASH, MediaMTX RTMP/RTMPS and SRT, HTTP-FLV, viewer sessions, aliases, caching and cleanup. [Phase 3 status](docs/PHASE_3_STATUS.md) tracks automated verification, manual UI acceptance and the extended FFmpeg dependency for live playout control.
 
-### 4 — Operations and IAM
+### 4 — Operations and IAM (local implementation, compatibility gaps open)
 
 The standalone operations layer uses SQLite for managed identities, policy assignments, zone declarations and durable audit events. Linux sampling, request budgets, bounded event streams and rustls certificate management operate locally. [Phase 4 status](docs/PHASE_4_STATUS.md) records automated checks, remaining v3 differences, and exit gates.
 
-### 5 — Distributed control plane
+### 5 — Distributed control plane (implemented subset, exit criteria open)
 
 Provide standalone and clustered modes, with stable node identity, enrollment/authentication, heartbeat and resource inventory. Replicate durable desired state with a reviewed consensus library; distinguish quorum decisions from ephemeral telemetry. Implement reconciliation, reservations, affinity, zones, relocation, rebalancing, failover and distributed locks/leases with fencing. Test partitions, leader elections, duplicate commands, node removal, recovery, snapshots and rolling upgrades. Expose v3 cluster APIs; decide mixed Go/Rust cluster support separately. Prevent conflicting process ownership when quorum is unavailable.
 
 The opt-in Raft implementation and remaining exit criteria appear in [Phase 5 status](docs/PHASE_5_STATUS.md). See [cluster installation](docs/CLUSTER.md) for supported node roles and ownership assumptions.
 
-### 6 — Release and maintenance
+### 6 — Release and maintenance (candidate, exit criteria open)
 
-Finish endpoint/feature coverage, GraphQL operations and legacy UI tests. Add documented migrations and safe rollback for applicable existing configurations, native binaries and Docker images for supported architectures, health/readiness, observability, dependency/license audit, release SBOM, soak/load tests and disaster recovery drills. The [candidate build and recovery workflow](docs/DEPLOYMENT.md) can generate unsigned native and container artifacts. Production publication, Go migration, GraphQL and the release acceptance gates remain open.
+The candidate adds GraphQL, operator CLI, offline Go JSON migration, verified SQLite restore, release packaging and dependency policies. The [release status](docs/PHASE_6_STATUS.md) tracks unfinished work across the roadmap and current verification evidence. Stable publication requires the separate [acceptance checklist](docs/RELEASE_ACCEPTANCE.md).
 
 ## Quality gates
 

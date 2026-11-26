@@ -1,5 +1,10 @@
 name: Rust
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '13 4 * * 6'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,7 +16,7 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -29,4 +34,7 @@ jobs:
       - run: bash scripts/test-acme.sh target/release/restreamer-core
       - run: bash scripts/smoke-test.sh target/release/restreamer-core
       - run: python3 scripts/test-cluster.py target/release/restreamer-core
-      - run: python3 scripts/test-recovery.py target/release/restreamer-core --seconds 5
+      - name: Exercise recovery under concurrent media and API load
+        env:
+          SOAK_SECONDS: ${{ github.event_name == 'schedule' && '120' || '5' }}
+        run: python3 scripts/test-recovery.py target/release/restreamer-core --seconds "$SOAK_SECONDS"

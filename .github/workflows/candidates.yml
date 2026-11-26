@@ -6,6 +6,11 @@ permissions:
 
 jobs:
   linux:
+    if: github.ref == 'refs/heads/main' && github.repository == 'Castvane/core'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -15,20 +20,37 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: cargo build --locked --release
+      - name: Verify candidate version and commit
+        run: |
+          version=$(target/release/restreamer-core --version)
+          [[ "$version" =~ ^restreamer-core\ [0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+\ \($GITHUB_SHA\)$ ]]
       - run: bash scripts/smoke-test.sh target/release/restreamer-core
       - run: python3 scripts/package-release.py target/release/restreamer-core dist
-      - name: Build and exercise the container
+      - name: Test image built with Ubuntu FFmpeg
+        run: bash scripts/test-container.sh target/release/restreamer-core
+      - name: Package administrator-supplied FFmpeg image
+        env:
+          CASTVANE_BUNDLE_FFMPEG: 'false'
         run: bash scripts/test-container.sh target/release/restreamer-core dist
+      - name: Attest the native and container archives
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: 'dist/*.tar.gz'
+      - name: Attest the Rust SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: 'dist/castvane-core-*-linux-*.tar.gz'
+          sbom-path: dist/core.bom.cdx.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: castvane-core-linux-${{ matrix.arch }}
           path: dist/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30

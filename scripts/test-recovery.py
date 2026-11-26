@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 import os
 import socket
-import sqlite3
 import subprocess
 import tempfile
 import time
@@ -103,11 +102,12 @@ def peak_rss(pid):
     return next(int(line.split()[1]) for line in status.splitlines() if line.startswith("VmHWM:"))
 
 
-def backup(source, target):
-    with sqlite3.connect(source) as active, sqlite3.connect(target) as copy:
-        active.backup(copy)
-        assert copy.execute("PRAGMA integrity_check").fetchone() == ("ok",)
-    target.chmod(0o600)
+def backup(binary, source, snapshot, target):
+    def environment(database):
+        return {"PATH": os.environ["PATH"], "CORE_DATABASE_PATH": str(database)}
+    checksum = subprocess.check_output([binary, "backup", snapshot], env=environment(source), text=True).strip()
+    subprocess.run([binary, "restore", snapshot, "--sha256", checksum], env=environment(target), check=True)
+    subprocess.run([binary, "database-check"], env=environment(target), check=True)
 
 
 def load(port, headers, seconds, clients):
@@ -136,8 +136,8 @@ def main():
     parser.add_argument("--seconds", type=int, default=15)
     parser.add_argument("--clients", type=int, default=4)
     args = parser.parse_args()
-    if not 1 <= args.seconds <= 3600 or not 1 <= args.clients <= 64:
-        parser.error("choose 1–3600 seconds and 1–64 clients")
+    if not 1 <= args.seconds <= 259200 or not 1 <= args.clients <= 64:
+        parser.error("choose 1–259200 seconds and 1–64 clients")
     binary = args.binary.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="castvane-recovery-") as work:
         primary = Path(work) / "primary"
@@ -161,7 +161,7 @@ def main():
             before_load = peak_rss(process.pid)
             requests = load(port, headers, args.seconds, args.clients)
             after_load = peak_rss(process.pid)
-            backup(primary / "core.sqlite", restore / "core.sqlite")
+            backup(binary, primary / "core.sqlite", Path(work) / "backup.sqlite", restore / "core.sqlite")
             process.kill()
             process.wait(timeout=5)
         wait_until(lambda: dead(pid))

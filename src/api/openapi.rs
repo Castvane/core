@@ -1,6 +1,7 @@
 use axum::{
     Json,
-    response::{Html, Redirect},
+    http::header,
+    response::{Html, IntoResponse, Redirect},
 };
 use serde_json::{Value, json};
 
@@ -10,8 +11,18 @@ pub async fn redirect() -> Redirect {
 
 pub async fn index() -> Html<&'static str> {
     Html(
-        r#"<!doctype html><html lang="en"><meta charset="utf-8"><title>Restreamer Core API</title>
-<h1>Restreamer Core API</h1><p><a href="doc.json">OpenAPI document</a></p></html>"#,
+        r#"<!doctype html><html lang="en"><meta charset="utf-8"><title>Castvane Core API</title>
+<h1>Castvane Core API</h1><p><a href="doc.json">OpenAPI document</a> · <a href="openapi.json">Download JSON</a></p></html>"#,
+    )
+}
+
+pub async fn download() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=castvane-openapi.json",
+        )],
+        document().await,
     )
 }
 
@@ -39,7 +50,52 @@ pub async fn document() -> Json<Value> {
     media_paths(&mut spec);
     operations_paths(&mut spec);
     cluster_paths(&mut spec);
+    documentation_paths(&mut spec);
     Json(spec)
+}
+
+fn documentation_paths(spec: &mut Value) {
+    let paths = &mut spec["paths"];
+    for (path, description, media_type) in [
+        ("/api/swagger/index.html", "OpenAPI index", "text/html"),
+        (
+            "/api/swagger/doc.json",
+            "OpenAPI document",
+            "application/json",
+        ),
+        (
+            "/api/swagger/openapi.json",
+            "Download the OpenAPI document",
+            "application/json",
+        ),
+        ("/api/graph", "GraphQL index", "text/html"),
+        (
+            "/api/graph/schema.graphql",
+            "Download the GraphQL schema",
+            "text/plain",
+        ),
+    ] {
+        paths[path]["get"] = json!({"summary":description, "security":[{"bearer":[]}],
+            "responses":{"200":{"description":description, "content":{(media_type): {}}},
+                "401":error(),"403":error()}});
+    }
+    paths["/api/graph/query"]["post"] = json!({
+        "summary":"Execute a bounded GraphQL query",
+        "description":"Requires an access token when API authentication is enabled. Process fields enforce resource policy. Probe also requires process write permission and an editable process.",
+        "security":[{"bearer":[]}],
+        "requestBody":{"required":true,"content":{"application/json":{
+            "schema":{"type":"object","required":["query"],"properties":{
+                "query":{"type":"string"},"variables":{"type":["object","null"]},
+                "operationName":{"type":["string","null"]}
+            }},"example":{"query":"{ ping }"}
+        }}},
+        "responses":{"200":{"description":"Execution result, including any GraphQL validation or field errors",
+            "content":{"application/json":{"schema":{"type":"object","properties":{
+                "data":{"type":["object","null"]},"errors":{"type":"array","items":{"type":"object","required":["message"],"properties":{"message":{"type":"string"},"path":{"type":"array","items":{"type":["integer","string"]}}}}}
+            }}}}},
+            "400":{"description":"Invalid JSON request"},"401":error(),"403":error(),
+            "408":{"description":"Execution deadline exceeded"},"413":{"description":"Request exceeds 128 KiB"}}
+    });
 }
 
 fn process_paths(spec: &mut Value) {

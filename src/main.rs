@@ -2,7 +2,10 @@
 
 use std::{ffi::OsString, os::unix::process::CommandExt, sync::Arc};
 
+mod cli;
+
 use axum::serve::{Listener, ListenerExt};
+use clap::Parser;
 use restreamer_core::{App, StartupError, config::Environment};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -15,10 +18,11 @@ fn main() -> Result<(), StartupError> {
         }
         return Ok(());
     }
+    let cli = cli::Cli::parse();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(serve())
+        .block_on(cli::run(cli.command))
 }
 
 fn media_child(mut args: impl Iterator<Item = OsString>) -> Result<(), StartupError> {

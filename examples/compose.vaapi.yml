@@ -1,0 +1,6 @@
+services:
+  core:
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    group_add:
+      - "${CASTVANE_RENDER_GID:?Set CASTVANE_RENDER_GID to the render node group ID}"

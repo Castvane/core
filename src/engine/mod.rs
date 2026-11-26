@@ -24,12 +24,15 @@ use tokio::{
 };
 
 pub(crate) use budget::Budget;
+pub(crate) use command::validate_references;
 pub(crate) use command::{Options, sanitize};
 pub(crate) use model::*;
 pub(crate) use probe::ResultSet;
 use progress::lock;
 use repository::Repository;
+pub(crate) use repository::write_metadata;
 pub(crate) use skills::Inventory;
+pub(crate) use skills::inspect as inspect_executables;
 
 pub const MAX_JOBS: usize = 128;
 pub type Key = (String, String);

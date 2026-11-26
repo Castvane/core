@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a reproducible Castvane problem
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Castvane version and commit
+      description: Output of restreamer-core --version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Deployment and platform
+      description: Architecture, FFmpeg version, standalone or cluster, and native or container.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and expected behavior
+      description: Remove all credentials, private URLs and network identifiers. Report security issues privately.
+    validations:
+      required: true

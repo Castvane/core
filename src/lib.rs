@@ -9,6 +9,8 @@ mod engine;
 mod http_server;
 mod iam;
 mod listener;
+pub mod maintenance;
+pub mod migration;
 mod ops;
 mod zone;
 pub use http_server::serve_http;

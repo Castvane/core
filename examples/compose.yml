@@ -1,0 +1,23 @@
+services:
+  core:
+    image: ${CASTVANE_IMAGE:-castvane-core:local}
+    init: true
+    read_only: true
+    env_file:
+      - ${CASTVANE_ENV_FILE:-./private.env}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - state:/var/lib/castvane
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    stop_grace_period: 20s
+volumes:
+  state: {}

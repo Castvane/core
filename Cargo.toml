@@ -1,6 +1,6 @@
 [package]
 name = "restreamer-core"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
@@ -49,3 +49,6 @@ tower = { version = "0.5", features = ["util"] }
 instant-acme = { version = "0.8.5", features = ["rcgen"] }
 x509-parser = "0.18"
 openraft = { version = "0.9.22", features = ["serde"] }
+clap = { version = "4.6", features = ["derive"] }
+sha2 = "0.11"
+async-graphql = { version = "7.2", default-features = false, features = ["dynamic-schema"] }

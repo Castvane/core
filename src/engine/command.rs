@@ -1018,7 +1018,12 @@ static DATE_PLACEHOLDER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock
 });
 
 fn cleanup_location(options: &Options, value: &str) -> Option<(String, String)> {
-    if let Ok(url) = url::Url::parse(value) {
+    let path = Path::new(value);
+    if !matches!(
+        path.components().next(),
+        Some(std::path::Component::Prefix(_))
+    ) && let Ok(url) = url::Url::parse(value)
+    {
         if url.scheme() == "file" {
             let path = url.to_file_path().ok()?;
             return cleanup_location(options, path.to_str()?);
@@ -1048,7 +1053,6 @@ fn cleanup_location(options: &Options, value: &str) -> Option<(String, String)> 
         }
         return None;
     }
-    let path = Path::new(value);
     let path = path.strip_prefix(Path::new(&options.disk)).unwrap_or(path);
     if path.is_absolute() {
         return None;

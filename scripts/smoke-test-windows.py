@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -50,6 +51,13 @@ def exercise(binary, work):
 
             assert call("/ping") == b"pong"
             assert json.loads(call("/api"))["version"]["arch"] == "windows/amd64"
+            for name in ("NUL.txt", "sample%3Aalt", "trailing."):
+                try:
+                    call(f"/api/v3/fs/disk/{name}", "PUT", "reserved")
+                except HTTPError as error:
+                    assert error.code == 400, error.code
+                else:
+                    raise AssertionError("Windows-specific filename was accepted")
             call("/api/v3/process", "POST", {
                 "id": "fixture", "autostart": True,
                 "input": [{"id": "source", "address": "testsrc2=size=64x64:rate=12",

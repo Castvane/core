@@ -799,6 +799,7 @@ async fn dynamic_references_reuse_the_producer_endpoint_and_cleanup_is_scoped() 
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn standalone_core_crash_terminates_the_media_leader() {
+    use std::os::unix::fs::PermissionsExt;
     let dir = TempDir::new().unwrap();
     let ffmpeg = dir.path().join("parent-death-ffmpeg");
     let marker = dir.path().join("child-pid");

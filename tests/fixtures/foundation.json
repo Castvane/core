@@ -1,0 +1,9 @@
+{
+  "access_denied": {"code":403,"message":"Forbidden","details":["access denied"]},
+  "bad_credentials": {"code":403,"message":"Forbidden","details":["invalid username or password"]},
+  "wrong_token_use": {"code":403,"message":"Forbidden","details":["invalid token"]},
+  "authentication_methods": ["localjwt"],
+  "access_claims": {"iss":"datarhei-core","usefor":"access","exi":600},
+  "refresh_claims": {"iss":"datarhei-core","usefor":"refresh","exi":86400},
+  "configuration_fields": ["address","api","cluster","compress","created_at","db","debug","ffmpeg","host","id","log","metrics","name","playout","resources","router","rtmp","service","sessions","srt","storage","tls","update_check","version"]
+}

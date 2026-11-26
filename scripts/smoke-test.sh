@@ -14,6 +14,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+: >"$work_dir/server.log"
 CORE_BIND_ADDR=127.0.0.1:0 CORE_DATABASE_PATH="$work_dir/test.sqlite3" RUST_LOG=info "$binary" >"$work_dir/server.log" 2>&1 &
 pid=$!
 

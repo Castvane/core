@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::{Deserialize, Deserializer, de};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
@@ -84,16 +85,85 @@ pub async fn init_configuration(path: PathBuf) -> Result<(), StartupError> {
 
 pub(crate) async fn read_json(path: &Path, limit: u64) -> Result<Value, StartupError> {
     use tokio::io::AsyncReadExt;
-    let file = tokio::fs::File::open(path).await?;
-    if !file.metadata().await?.is_file() {
+    if !tokio::fs::metadata(path).await?.is_file() {
         return Err("expected a regular JSON file".into());
     }
+    let file = tokio::fs::File::open(path).await?;
     let mut data = zeroize::Zeroizing::new(Vec::new());
     file.take(limit + 1).read_to_end(&mut data).await?;
     if data.len() as u64 > limit {
         return Err("JSON file exceeds the supported size".into());
     }
-    Ok(serde_json::from_slice(&data)?)
+    Ok(serde_json::from_slice::<UniqueJson>(&data)?.0)
+}
+
+struct UniqueJson(Value);
+
+impl<'de> Deserialize<'de> for UniqueJson {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = UniqueJson;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a JSON value without duplicate keys")
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(
+                self,
+                mut access: A,
+            ) -> Result<Self::Value, A::Error> {
+                use serde_json::map::Entry;
+                let mut map = serde_json::Map::new();
+                while let Some(key) = access.next_key::<String>()? {
+                    match map.entry(key) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(access.next_value::<UniqueJson>()?.0);
+                        }
+                        Entry::Occupied(_) => {
+                            return Err(de::Error::custom("duplicate JSON object key"));
+                        }
+                    }
+                }
+                Ok(UniqueJson(Value::Object(map)))
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(
+                self,
+                mut access: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut values = Vec::new();
+                while let Some(value) = access.next_element::<UniqueJson>()? {
+                    values.push(value.0);
+                }
+                Ok(UniqueJson(Value::Array(values)))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Null))
+            }
+            fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(UniqueJson(value.into()))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(value.into()))
+            }
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(value.into()))
+            }
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(value.into()))
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(UniqueJson(value.into()))
+            }
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(UniqueJson(value.into()))
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 pub(crate) fn merge_configuration(patch: Value) -> Result<Value, StartupError> {

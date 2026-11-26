@@ -322,13 +322,23 @@ async fn authorize(
         || path.starts_with("/api/v3/report")
         || path.starts_with("/api/v3/skills");
     let reload = path.ends_with("/config/reload");
+    let probe = path
+        .strip_prefix("/api/v3/process/")
+        .and_then(|suffix| suffix.split_once('/'))
+        .is_some_and(|(_, operation)| operation == "probe");
+    let cluster_probe = path
+        .strip_prefix("/api/v3/cluster/process/")
+        .and_then(|suffix| suffix.split_once('/'))
+        .is_some_and(|(_, operation)| operation == "probe");
     let read_post = matches!(path, "/api/v3/metrics" | "/api/graph/query")
         || path.starts_with("/api/v3/events");
     let write = (matches!(
         *request.method(),
         Method::PUT | Method::POST | Method::DELETE
     ) && !read_post)
-        || reload;
+        || reload
+        || probe
+        || cluster_probe;
     // Serialize policy decisions and writes so a request cannot write with a stale policy.
     let _guard = if write
         && ["/api/v3/config", "/api/v3/iam", "/api/v3/zone"]
@@ -367,6 +377,7 @@ async fn authorize(
         && (path == "/api/v3/process" || path.starts_with("/api/v3/process/"))
         && path != "/api/v3/process/probe"
         && path != "/api/v3/process/validate"
+        && !probe
     {
         return Err(ApiError::Http(
             StatusCode::CONFLICT,
@@ -380,7 +391,7 @@ async fn authorize(
         ));
     }
     if write && settings.api.read_only {
-        return Err(if reload || process_route {
+        return Err(if reload || process_route || cluster_probe {
             ApiError::not_found()
         } else {
             ApiError::Http(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
@@ -434,7 +445,8 @@ fn managed_route(
         ("process", "probe" | "validate") if write => false,
         ("process", _) if write => {
             (matches!(*method, Method::PUT | Method::DELETE) && !rest.contains('/')
-                || rest.strip_suffix("/command").is_some())
+                || rest.strip_suffix("/command").is_some()
+                || (*method == Method::GET && rest.ends_with("/probe")))
                 && identity.allows(&domain, "process", &resource, action)
         }
         ("process", _) => identity.allows(&domain, "process", &resource, action),

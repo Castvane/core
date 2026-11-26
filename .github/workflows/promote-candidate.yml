@@ -14,6 +14,14 @@ on:
         description: Push the Core-only multi-architecture manifest to GHCR
         type: boolean
         default: false
+      publish_dockerhub:
+        description: Push the Core-only multi-architecture manifest to the configured Docker Hub repository
+        type: boolean
+        default: false
+
+concurrency:
+  group: castvane-candidate-promotion
+  cancel-in-progress: false
 
 permissions:
   actions: read
@@ -35,8 +43,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ inputs.candidate_run }}
       VERSION: ${{ inputs.version }}
-      PUBLISH: ${{ inputs.publish_ghcr }}
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Verify successful run and release artifacts
         run: |
           set -euo pipefail
@@ -44,6 +54,8 @@ jobs:
           build=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,headSha,headBranch)
           jq -e '.workflowName == "Candidate artifacts" and .conclusion == "success" and .headBranch == "main"' <<< "$build"
           revision=$(jq -er '.headSha | select(test("^[a-f0-9]{40}$"))' <<< "$build")
+          gh run list --repo "$GITHUB_REPOSITORY" --commit "$revision" --workflow rust.yml --status success \
+            --json databaseId --jq 'length > 0' | grep -qx true
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir candidates
           mkdir release
           for arch in amd64 arm64; do
@@ -60,6 +72,7 @@ jobs:
             cp "$directory/$native" "$directory/$native.sha256" release/
             cp "$directory/core.bom.cdx.json" "release/core-$arch.bom.cdx.json"
             cp "$directory/native-build.json" "release/native-$arch.json"
+            cp "$directory/container.bom.cdx.json" "release/container-$arch.bom.cdx.json"
           done
           echo "CASTVANE_RELEASE_REVISION=$revision" >> "$GITHUB_ENV"
       - name: Assemble the exact-version GHCR manifest
@@ -68,28 +81,19 @@ jobs:
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          # Existing tags require a new candidate version. Staging references are scoped to this run.
-          if docker buildx imagetools inspect "$image:$VERSION" > /dev/null 2>&1; then
-            echo "The requested version already exists in GHCR" >&2
-            exit 1
-          fi
-          sources=()
-          for arch in amd64 arm64; do
-            directory="candidates/castvane-core-linux-$arch"
-            local_id=$(jq -er '.[0].Id' "$directory/container-image.json")
-            docker load --input "$directory/castvane-core-container.tar.gz"
-            [[ $(docker image inspect --format '{{.Architecture}}' "$local_id") == "$arch" ]]
-            [[ $(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$local_id") == "$CASTVANE_RELEASE_REVISION" ]]
-            [[ $(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$local_id") == "$VERSION" ]]
-            staging="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$arch"
-            docker tag "$local_id" "$staging"
-            docker push "$staging"
-            digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$staging")
-            [[ "$digest" == "$image@sha256:"* ]]
-            sources+=("$digest")
-          done
-          docker buildx imagetools create --tag "$image:$VERSION" "${sources[@]}"
-          docker buildx imagetools inspect "$image:$VERSION" > release/container-manifest.txt
+          bash scripts/publish-candidate-image.sh "$image" "$VERSION" "$CASTVANE_RELEASE_REVISION" > release/ghcr-manifest.txt
+      - name: Assemble the exact-version Docker Hub manifest
+        if: inputs.publish_dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$DOCKERHUB_REPOSITORY" =~ ^[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$ ]]
+          [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+          bash scripts/publish-candidate-image.sh "docker.io/$DOCKERHUB_REPOSITORY" "$VERSION" "$CASTVANE_RELEASE_REVISION" > release/dockerhub-manifest.txt
       - name: Prepare an unpublished prerelease draft
         run: |
           set -euo pipefail

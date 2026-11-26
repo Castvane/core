@@ -508,13 +508,18 @@ async fn validate(
 
 async fn probe_job(
     State(app): State<Arc<App>>,
+    Extension(actor): Extension<Identity>,
     Path(id): Path<String>,
     args: QueryArgs,
 ) -> Response {
     let entry = app.processes.get(&query(args)?.key(id)).await?;
-    Ok(Json(dto::probe(
-        app.processes.probe(&entry.job().config).await?,
-    )))
+    let config = &entry.job().config;
+    if !actor.administrator() && !config.scoped {
+        return Err(ApiError::forbidden(
+            "delegated probes require a restricted process configuration",
+        ));
+    }
+    Ok(Json(dto::probe(app.processes.probe(config).await?)))
 }
 
 async fn probe_config(

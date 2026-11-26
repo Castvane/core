@@ -68,4 +68,5 @@ container=
 if [[ -n "$output" ]]; then
     docker save "$image" | gzip -n > "$output/castvane-core-container.tar.gz"
     (cd "$output" && sha256sum castvane-core-container.tar.gz > castvane-core-container.tar.gz.sha256)
+    python3 "$root/scripts/container-sbom.py" "$output" "$version"
 fi

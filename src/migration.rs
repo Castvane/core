@@ -392,9 +392,10 @@ async fn read_identities(
     let disabled_hash = hash_password(random).await?;
     let mut accounts = Vec::with_capacity(users.len());
     let mut names = BTreeSet::new();
+    let mut seen_bootstrap = false;
     for user in users {
         if user.name == bootstrap {
-            if !user.superuser {
+            if !user.superuser || std::mem::replace(&mut seen_bootstrap, true) {
                 return Err(
                     "a non-administrator identity conflicts with the bootstrap username".into(),
                 );

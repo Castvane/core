@@ -136,6 +136,50 @@ async fn graphql_legacy_queries_and_limits() {
         body["data"]["processes"][0]["config"]["input"][0]["id"],
         "in"
     );
+    assert_eq!(request(&app, "POST", "/api/v3/iam/user", Some(&token), json!({
+        "name":"reader","auth":{"api":{"userpass":"fixture-reader-password"}},
+        "policies":[{"domain":"$none","types":["process"],"resource":"phase6-*","actions":["read"]}]
+    })).await.0, 200);
+    let (status, tokens) = request(
+        &app,
+        "POST",
+        "/api/login",
+        None,
+        json!({
+            "username":"reader", "password":"fixture-reader-password"
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let tokens: Value = serde_json::from_slice(&tokens).unwrap();
+    let reader = tokens["access_token"].as_str().unwrap();
+    assert_eq!(
+        graph(&app, Some(reader), "{ processes { id } }").await.1["data"]["processes"][0]["id"],
+        "phase6-fixture"
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            "/api/v3/process/phase6-fixture/probe",
+            Some(reader),
+            Value::Null
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(
+        graph(
+            &app,
+            Some(reader),
+            r#"{ probe(id:"phase6-fixture",domain:""){log} }"#
+        )
+        .await
+        .1["errors"][0]["message"],
+        "forbidden"
+    );
+
     let (_, body) = graph(&app, Some(&token), "{ thisDoesNotExist }").await;
     assert!(body["errors"].is_array());
     let heavy = (0..240).map(|i| format!("a{i}:ping ")).collect::<String>();
@@ -293,6 +337,18 @@ async fn migration_rehearsal_and_transactional_publication() {
             &env,
         )
     };
+    std::fs::write(
+        &processes,
+        r#"{"version":4,"process":{"example":{},"example":{}}}"#,
+    )
+    .unwrap();
+    let duplicate = run(None).await.unwrap_err().to_string();
+    assert!(
+        duplicate.contains("duplicate JSON object key"),
+        "{duplicate}"
+    );
+    assert!(!target.exists());
+    std::fs::write(&processes, &document).unwrap();
     let report = run(None).await.unwrap();
     assert_eq!(report["dry_run"], true);
     assert_eq!(report["processes_previously_enabled"], 1);

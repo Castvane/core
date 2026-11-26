@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 ARG BASE=docker.io/library/ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
 FROM ${BASE} AS assemble
 COPY restreamer-core LICENSE /tmp/castvane/
@@ -22,7 +22,7 @@ RUN apt-get update \
     && install -d -m 0700 -o 10001 -g 10001 /var/lib/castvane /var/lib/castvane/media \
     && if [ "$BUNDLE_FFMPEG" = true ]; then ffmpeg -version; else echo "FFmpeg supplied by operator"; fi \
         > /usr/share/doc/castvane-core/ffmpeg-build.txt \
-    && dpkg-query -W '--showformat=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' \
+    && dpkg-query -W '--showformat=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' \
         > /usr/share/doc/castvane-core/runtime-packages.tsv
 
 ENV CORE_BIND_ADDR=0.0.0.0:8080 \

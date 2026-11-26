@@ -21,6 +21,18 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked --all-targets --all-features
+      - name: Verify kernel CPU and memory enforcement in a disposable cgroup
+        run: |
+          sudo systemd-run --quiet --wait --pipe --collect --unit="castvane-cgroup-fixture-${GITHUB_RUN_ID}" \
+            --uid="$(id -u)" --property="Delegate=cpu memory" --property=DelegateSubgroup=fixture-runner             --working-directory="$PWD" --setenv="PATH=$PATH" --setenv="HOME=$HOME" \
+            --setenv="CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" --setenv="RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
+            bash -euc '
+              current=$(sed -n "s/^0:://p" /proc/self/cgroup)
+              [[ "$current" == */fixture-runner ]]
+              root="/sys/fs/cgroup${current%/fixture-runner}"
+              echo "+cpu +memory" > "$root/cgroup.subtree_control"
+              bash scripts/test-cgroup.sh "$root"
+            '
       - run: bash scripts/test-media-services.sh
       - run: bash scripts/test-minio.sh
       - run: cargo build --locked --release

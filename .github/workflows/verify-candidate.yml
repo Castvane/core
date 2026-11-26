@@ -1,0 +1,36 @@
+name: Verify candidate artifacts
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful Candidate artifacts workflow run ID on main
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  attestations: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main' && github.repository == 'Castvane/core'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.candidate_run }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Verify both binary and container archives
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          metadata=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,headBranch,headSha)
+          jq -e '.workflowName == "Candidate artifacts" and .conclusion == "success" and .headBranch == "main"' <<< "$metadata"
+          revision=$(jq -er .headSha <<< "$metadata")
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir candidates
+          version=$(jq -er .version candidates/castvane-core-linux-amd64/native-build.json)
+          bash scripts/verify-candidate-artifacts.sh candidates "$GITHUB_REPOSITORY" "$revision" "$version"

@@ -116,3 +116,22 @@ The follow-up suite passed 75 checks across discovery, configuration, process co
 | GET `/readyz` | Readiness probe, no credentials | HTTP 200 or 503. Cluster readiness checks local membership/leader observation. Control-only members can be ready without FFmpeg. Use authenticated cluster health for a quorum-backed test. |
 
 The pinned Go GraphQL POST rejected authenticated JSON requests with HTTP 400 and `transport not supported`. Castvane implements the GraphQL query transport and schema behavior described in the [GraphQL guide](GRAPHQL.md). For current REST endpoint families and client-visible limitations, use the phase-specific contracts linked above and the [release backlog](PHASE_6_STATUS.md).
+
+## Cluster gaps against the pinned Go route table
+
+All paths in this table are relative to `/api/v3/cluster`. The Go router only registers this family when cluster service is enabled. Mutation and probe routes also depend on read-only configuration. Castvane cluster operations require API authentication and administrator permissions.
+
+| Reference method and path | Castvane behavior |
+| --- | --- |
+| GET `/snapshot` | Returns committed snapshot and applied indexes as nullable integers. Go's snapshot download has a different response contract. Use the Castvane member backup tool for restoration. |
+| GET `/db/process`, `/db/process/{id}`, `/db/user`, `/db/user/{name}`, `/db/policies`, `/db/node` | Raw Go store routes are absent. Use the Castvane process, identity, policy and node management routes. |
+| GET `/db/map/process` and `/db/map/reallocate` | Raw Go database maps are absent. Process and deployment views provide Castvane assignments and ownership epochs. |
+| GET `/db/kv` and `/db/locks` | Available with Castvane record revisions and lease tokens. Response shapes differ from Go. |
+| GET `/node/{id}/files`, `/node/{id}/process`, `/node/{id}/version`, `/fs/{storage}` | Reference node summaries and aggregate filesystem listing are absent. Individual mounted storage reads are available through the node filesystem routes. |
+| PUT `/node/{id}/fs` | Reference remote copy/move is absent. Per-node file PUT and DELETE are supported. |
+| POST `/events`, `/events/log`, `/events/process` | Cluster-wide event forwarding is absent. Use local event subscriptions with the relevant node. |
+| PUT `/transfer/{id}` and `/leave` | Targeted leader transfer and automated leave are absent. Provisioned voting membership can be changed through the Castvane membership route, with quorum. |
+| PUT `/iam/reload` | Go-specific policy and identity file reload is absent. Castvane identity updates are replicated commands and authorization uses a quorum-backed read fence. |
+| PUT `/reallocation` | Accepts a JSON object with process `id` and numeric destination `node` or null. Existing Go clients must account for the Castvane placement contract. |
+
+See the [cluster status](PHASE_5_STATUS.md) for implemented methods, feature conditions and gaps. The Go internal `/v1/*` endpoint family cannot join the Castvane RPC protocol.

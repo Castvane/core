@@ -24,6 +24,8 @@ gh attestation verify castvane-core-0.2.0-rc.1-linux-amd64.tar.gz \
   --repo Castvane/core --signer-workflow Castvane/core/.github/workflows/candidates.yml
 ```
 
+Use **Verify candidate artifacts** to confirm both native and container archive checksums, version labels, build provenance and SBOM attestations from the selected build run without publishing.
+
 Configure a protected GitHub environment named `release-candidate` with required reviewers before using **Promote release candidate**. Provide the successful build run ID and exact version. Promotion verifies the identity, checksum and provenance and prepares an unpublished GitHub prerelease draft. The optional GHCR step publishes the tested Core-only images with an exact candidate tag and records the multi-architecture digest. The temporary manifest source tags include the run and attempt ID. The optional Docker Hub publisher reads `DOCKERHUB_USERNAME` and `DOCKERHUB_REPOSITORY` from protected environment variables and `DOCKERHUB_TOKEN` from its secrets. Set the repository to `namespace/repo` and use a scoped token. Both registry paths check the architecture and version of each archive and assemble by digest. Stable publishing remains gated.
 
 Stable publication requires the mandatory [owner acceptance](RELEASE_ACCEPTANCE.md) and explicit approval. Only a stable workflow should advance `latest` and supported major/minor aliases. Development builds use commit identifiers. Never repoint a released exact version. No bit-for-bit reproducibility claim is made.

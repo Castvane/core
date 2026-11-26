@@ -22,4 +22,4 @@ Use `v1.0.0`, `v1.8.0`, `v1.14.0`, `upstream` or `owner` as the pin. The harness
 
 The upstream pins that signed in also requested the optional `restreamer-ui` metadata key. A fresh instance has no saved value and returned 404. The same instance still refreshed the session successfully.
 
-Full dashboard, process control, media playback, settings and administration workflows remain gated. Manual acceptance and the remaining v1 tags are open. Castvane continues to report its application version.
+A Phase 6 rerun against the `0.2.0-rc.1` binary reproduced these outcomes for v1.8.0, v1.14.0, upstream HEAD and the owner pin. The v1.0.0 bundle still has the recorded Linux source-path blocker. Full dashboard, process control, media playback, settings and administration remain unverified. Castvane reports its own application version. Selecting a legacy version compatibility policy remains a release decision.

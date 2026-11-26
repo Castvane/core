@@ -1,0 +1,483 @@
+{
+  "uid": "castvane-core",
+  "title": "Castvane Core",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "tags": [
+    "castvane"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "__inputs": [
+    {
+      "name": "CASTVANE_PROMETHEUS",
+      "label": "Castvane Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Scrape target availability",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"castvane\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Active FFmpeg jobs",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_process_running",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "HTTP media throughput",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(castvane_media_http_bytes_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "HTTP viewers and native publishers",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_media_http_viewers",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_media_publishers",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Disk usage and capacity",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_disk_usage",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_disk_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Memory storage and capacity",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_storage_memory_used_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_storage_memory_capacity_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Host and FFmpeg CPU",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 - castvane_cpu_idle",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_process_cpu_percent",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Cgroup memory and FFmpeg RSS",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_cgroup_memory_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_process_memory_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "GPU utilization",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_gpu_usage",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_gpu_encoder",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "C",
+          "expr": "castvane_gpu_decoder",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Raft leadership and voter count",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_cluster_is_leader",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        },
+        {
+          "refId": "B",
+          "expr": "castvane_cluster_voters",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "Raft local apply lag",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "castvane_cluster_log_index - castvane_cluster_applied_index",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "title": "FFmpeg failure rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${CASTVANE_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(castvane_process_failed_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${CASTVANE_PROMETHEUS}"
+          },
+          "legendFormat": "{{__name__}} {{instance}} {{index}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

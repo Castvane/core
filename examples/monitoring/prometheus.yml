@@ -3,5 +3,8 @@ global:
 scrape_configs:
   - job_name: castvane
     metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/castvane.jwt
     static_configs:
       - targets: ['127.0.0.1:8080']

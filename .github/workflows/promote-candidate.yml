@@ -57,18 +57,11 @@ jobs:
           gh run list --repo "$GITHUB_REPOSITORY" --commit "$revision" --workflow rust.yml --status success \
             --json databaseId --jq 'length > 0' | grep -qx true
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir candidates
+          bash scripts/verify-candidate-artifacts.sh candidates "$GITHUB_REPOSITORY" "$revision" "$VERSION"
           mkdir release
           for arch in amd64 arm64; do
             directory="candidates/castvane-core-linux-$arch"
             native="castvane-core-$VERSION-linux-$arch.tar.gz"
-            container=castvane-core-container.tar.gz
-            (
-              cd "$directory"
-              jq -e --arg version "$VERSION" --arg revision "$revision" '.version == $version and .commit == $revision' native-build.json
-              sha256sum -c "$native.sha256" "$container.sha256"
-              gh attestation verify "$native" --repo "$GITHUB_REPOSITORY" --source-digest "$revision" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/candidates.yml"
-              gh attestation verify "$container" --repo "$GITHUB_REPOSITORY" --source-digest "$revision" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/candidates.yml"
-            )
             cp "$directory/$native" "$directory/$native.sha256" release/
             cp "$directory/core.bom.cdx.json" "release/core-$arch.bom.cdx.json"
             cp "$directory/native-build.json" "release/native-$arch.json"

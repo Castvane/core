@@ -209,6 +209,7 @@ impl Environment {
             ),
             ("sessions.enable", "CORE_SESSIONS_ENABLE"),
             ("srt.enable", "CORE_SRT_ENABLE"),
+            ("playout.enable", "CORE_PLAYOUT_ENABLE"),
             ("tls.enable", "CORE_TLS_ENABLE"),
             ("metrics.enable", "CORE_METRICS_ENABLE"),
             ("cluster.enable", "CORE_CLUSTER_ENABLE"),

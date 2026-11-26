@@ -507,8 +507,13 @@ async fn ffmpeg_plays_generated_hls_and_dash_via_core_http() {
 async fn s3_multipart_ranged_and_public_delivery() {
     let dir = TempDir::new().unwrap();
     let endpoint = std::env::var("PHASE3_S3_ENDPOINT").unwrap();
-    let config=json!([{"name":"object","mountpoint":"/objects","endpoint":endpoint,
-        "region":"us-east-1","bucket":"phase3","access_key_id":"fixture-key","secret_access_key":"fixture-secret","use_ssl":false}]).to_string();
+    let config = json!([
+        {"name":"object","mountpoint":"/objects","endpoint":endpoint,
+         "region":"us-east-1","bucket":"phase3","access_key_id":"fixture-key","secret_access_key":"fixture-secret","use_ssl":false},
+        {"name":"private","mountpoint":"/private-s3","endpoint":endpoint,
+         "region":"us-east-1","bucket":"phase3","access_key_id":"fixture-key","secret_access_key":"fixture-secret","use_ssl":false,
+         "auth":{"enable":true,"username":"object-user","password":"object-password"}}
+    ]).to_string();
     let fixture = Fixture::open(&dir, &[("CORE_STORAGE_S3_JSON", &config)]).await;
     let path = "/api/v3/fs/object/a.mp4";
     let size = 9 * 1024 * 1024;
@@ -541,6 +546,22 @@ async fn s3_multipart_ranged_and_public_delivery() {
             .await[0]["size_bytes"],
         size
     );
+    fixture
+        .expect(403, "HEAD", "/private-s3/a.mp4", Body::empty())
+        .await;
+    let private = fixture
+        .request(
+            "HEAD",
+            "/private-s3/a.mp4",
+            &[(
+                "authorization",
+                "Basic b2JqZWN0LXVzZXI6b2JqZWN0LXBhc3N3b3Jk",
+            )],
+            Body::empty(),
+        )
+        .await;
+    assert_eq!(private.status(), 200);
+    assert_eq!(private.headers()["cache-control"], "private, no-store");
     fixture.expect(200, "DELETE", path, Body::empty()).await;
     fixture.close().await;
 }
@@ -652,6 +673,7 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             ])
             .args(tls)
             .arg(&publisher)
+            .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
         wait_channel(&fixture, protocol, true).await;
@@ -677,6 +699,7 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             assert!(first.starts_with(b"FLV"));
             drop(data);
         }
+        let reader_started = std::time::Instant::now();
         let status = tokio::time::timeout(
             Duration::from_secs(15),
             tokio::process::Command::new("ffmpeg")
@@ -684,12 +707,17 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
                 .args(["-nostdin", "-v", "error"])
                 .args(tls)
                 .args(["-i", &player, "-frames:v", "6", "-f", "null", "-"])
+                .stderr(std::process::Stdio::null())
                 .status(),
         )
         .await
         .unwrap()
         .unwrap();
         assert!(status.success(), "{wire}");
+        println!(
+            "{wire} playback plus six-frame decode: {:.2} s",
+            reader_started.elapsed().as_secs_f64()
+        );
         let disconnect = if protocol == "rtmp" {
             "/api/v3/rtmp/disconnect?path=*"
         } else {
@@ -873,6 +901,44 @@ async fn dash_manifest_and_segments_share_one_viewer() {
 }
 
 #[tokio::test]
+async fn extended_ffmpeg_playout_reports_unavailable_operations() {
+    let dir = TempDir::new().unwrap();
+    let fixture = Fixture::open(&dir, &[]).await;
+    let cfg = json!({"id":"play",
+        "input":[{"id":"in","address":"testsrc2=size=64x64:rate=10","options":["-f","lavfi"]}],
+        "output":[{"id":"out","address":"-","options":["-f","null"]}]
+    });
+    fixture
+        .json(200, "POST", "/api/v3/process", Some(cfg))
+        .await;
+    fixture
+        .expect(
+            404,
+            "GET",
+            "/api/v3/process/play/playout/in/status",
+            Body::empty(),
+        )
+        .await;
+    fixture.close().await;
+
+    let fixture = Fixture::open(&dir, &[("CORE_PLAYOUT_ENABLE", "true")]).await;
+    for (method, route) in [
+        ("GET", "status"),
+        ("GET", "reopen"),
+        ("GET", "keyframe/snapshot.png"),
+        ("GET", "errorframe/encode"),
+        ("PUT", "errorframe/error.png"),
+        ("POST", "errorframe/error.png"),
+        ("PUT", "stream"),
+    ] {
+        let path = format!("/api/v3/process/play/playout/in/{route}");
+        let error = fixture.json(501, method, &path, None).await;
+        assert_eq!(error["code"], 501);
+    }
+    fixture.close().await;
+}
+
+#[tokio::test]
 #[ignore = "repeatable measurement, run with --ignored --nocapture"]
 async fn benchmark_http_media() {
     let dir = TempDir::new().unwrap();
@@ -945,6 +1011,69 @@ async fn benchmark_http_media() {
             f64::from(loops * 8) / elapsed
         );
     }
+    for storage in ["disk", "mem"] {
+        let mut latencies = Vec::new();
+        for index in 0..24 {
+            let path = format!("/api/v3/fs/{storage}/write-bench-{index}.ts");
+            let start = std::time::Instant::now();
+            fixture
+                .expect(201, "PUT", &path, Body::from(vec![4; 4096]))
+                .await;
+            latencies.push(start.elapsed());
+            fixture.expect(200, "DELETE", &path, Body::empty()).await;
+        }
+        latencies.sort_unstable();
+        println!(
+            "{storage} storage 4 KiB publish: p50 {:.2} ms, p95 {:.2} ms",
+            latencies[12].as_secs_f64() * 1000.0,
+            latencies[22].as_secs_f64() * 1000.0
+        );
+    }
+
+    let url = format!("{}/memfs/benchmark.m4s", fixture.origin);
+    let mut viewers = Vec::new();
+    for _ in 0..4 {
+        let client = client.clone();
+        let url = url.clone();
+        viewers.push(tokio::spawn(async move {
+            let mut stream = client
+                .get(url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .bytes_stream();
+            let mut received = 0;
+            use futures_util::StreamExt;
+            while let Some(chunk) = stream.next().await {
+                received += chunk.unwrap().len();
+                tokio::time::sleep(Duration::from_millis(8)).await;
+            }
+            received
+        }));
+    }
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let start = std::time::Instant::now();
+    let fast = client
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(fast.len(), 4 * 1024 * 1024);
+    println!(
+        "unslowed 4 MiB download with four paced viewers: {:.2} ms",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
+    for viewer in viewers {
+        assert_eq!(viewer.await.unwrap(), fast.len());
+    }
+
     let status = tokio::fs::read_to_string("/proc/self/status")
         .await
         .unwrap();

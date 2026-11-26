@@ -65,10 +65,11 @@ else:
     raise SystemExit("could not allocate local media test ports")
 PYPORT
 )
-    "$PHASE3_WEED_BINARY" mini -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir="$test_dir/objects" \
+    weed=$(realpath "$PHASE3_WEED_BINARY")
+    (cd "$test_dir" && exec "$weed" mini -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir="$test_dir/objects" \
         -master.port="$master" -volume.port="$volume" -filer.port="$filer" -s3.port="$s3" \
         -admin.port="$admin" -admin.port.legacy=0 -bucket=phase3 \
-        -s3.config="$test_dir/iam.json" > "$test_dir/seaweed.log" 2>&1 &
+        -s3.config="$test_dir/iam.json") > "$test_dir/seaweed.log" 2>&1 &
     weed_pid=$!
     export PHASE3_S3_ENDPOINT="http://127.0.0.1:$s3"
     ready=false

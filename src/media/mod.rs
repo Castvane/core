@@ -30,6 +30,7 @@ pub struct Mount {
     pub kind: &'static str,
     pub prefix: String,
     pub backend: Arc<dyn Storage>,
+    pub auth: Option<(String, Zeroizing<String>)>,
 }
 
 pub struct Media {
@@ -102,6 +103,7 @@ impl Media {
                 kind: "disk",
                 prefix: "/".into(),
                 backend: Arc::new(disk),
+                auth: None,
             },
         );
         let memsize = mbytes(&memory["max_size_mbytes"], 64)?;
@@ -116,6 +118,7 @@ impl Media {
                 kind: "mem",
                 prefix: "/memfs".into(),
                 backend: Arc::new(mem),
+                auth: None,
             },
         );
         let s3 = storage["s3"].as_array().into_iter().flatten();
@@ -135,6 +138,20 @@ impl Media {
                 return Err(Error::Invalid);
             }
             let backend = S3::open(&cfg)?;
+            let auth = if entry["auth"]["enable"].as_bool() == Some(true) {
+                let value = &entry["auth"];
+                let user = value["username"]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .ok_or(Error::Invalid)?;
+                let password = value["password"]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .ok_or(Error::Invalid)?;
+                Some((user.to_owned(), Zeroizing::new(password.to_owned())))
+            } else {
+                None
+            };
             mounts.insert(
                 cfg.name.clone(),
                 Mount {
@@ -142,6 +159,7 @@ impl Media {
                     kind: "s3",
                     prefix: cfg.mountpoint,
                     backend: Arc::new(backend),
+                    auth,
                 },
             );
         }

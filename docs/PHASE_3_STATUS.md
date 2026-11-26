@@ -67,7 +67,7 @@ S3 can use AWS or a custom HTTPS endpoint. Supply bucket definitions in `CORE_ST
   "use_ssl":true,"access_key_id":"SUPPLIED_BY_OPERATOR","secret_access_key":"SUPPLIED_BY_OPERATOR"}]
 ```
 
-Use a blank endpoint for AWS, or the MinIO service address for a self-hosted deployment. Path-style addressing is the default. Set `virtual_hosted_style` to true for providers that require virtual-hosted requests. The legacy `CORE_STORAGE_S3` URL list is supported. The integration suite uses SeaweedFS; AWS, MinIO and R2 deployments require provider acceptance.
+Use a blank endpoint for AWS, or the MinIO service address for a self-hosted deployment. A bucket mount can require HTTP Basic authentication with `auth.enable`, `auth.username` and `auth.password`. Path-style addressing is the default. Set `virtual_hosted_style` to true for providers that require virtual-hosted requests. The legacy `CORE_STORAGE_S3` URL list is supported. The integration suite uses SeaweedFS. AWS, MinIO and R2 deployments require provider acceptance.
 
 Additional controls include `CORE_STORAGE_PRIVATE`, `CORE_STORAGE_UPLOAD_BITRATE_KBIT`, `CORE_STORAGE_DOWNLOAD_BITRATE_KBIT`, `CORE_STORAGE_CORS_ORIGINS`, disk cache `CORE_STORAGE_DISK_CACHE_*` settings, `CORE_SESSIONS_SESSION_TIMEOUT_SEC`, `CORE_SESSIONS_MAX_BITRATE_MBIT`, `CORE_SESSIONS_STREAM_BITRATE_KBIT` and `CORE_SESSIONS_SESSION_BITRATE_KBIT`. Zero bandwidth limits leave throughput unpaced. Zero session limits select bounded node defaults. Single API uploads are capped at 4 GiB. The media aliases and storage/configuration secrets are protected by the same filesystem and SQLite permissions as Phase 1. Prefer passing secrets through the deployment environment and protect server-side configuration and database backups.
 
@@ -83,7 +83,23 @@ Additional controls include `CORE_STORAGE_PRIVATE`, `CORE_STORAGE_UPLOAD_BITRATE
 
 Run `cargo test --locked --all-targets --all-features` for the application suite, `bash scripts/test-media-services.sh` for isolated object storage and real FFmpeg transport checks, and `cargo test --locked --test media benchmark_http_media -- --ignored --nocapture` for the repeatable loopback benchmark. The fixture script provisions checksum-pinned binaries for Linux amd64 and arm64. The benchmark exercises concurrent 4 MiB disk and memory responses, 1 MiB ranges and rewritten 500-entry HLS manifests. It records wall time and peak RSS of the combined test process. It provides no cross-implementation comparison.
 
-The local Linux x86-64 test host exposed three AMD EPYC vCPUs and used FFmpeg 7.1.5. A single unoptimized eight-viewer run measured 211.4 MiB/s for disk reads, 258.0 MiB/s for memory reads, 205.6 MiB/s for memory ranges and 150 playlist rewrites per second. Peak RSS was 101,268 KiB for the server and load generator in one test process. This run did not measure cross-host throughput, separate server RSS or isolated transport connection overhead.
+The local Linux x86-64 test host exposed three AMD EPYC vCPUs and used FFmpeg 7.1.5. The unoptimized test executable served media to eight loopback viewers. Metrics include server and client work.
+
+| Measurement | Result |
+| --- | ---: |
+| Full disk reads | 159.3 MiB/s |
+| Full memory reads | 211.5 MiB/s |
+| 1 MiB memory ranges | 245.3 MiB/s |
+| HLS rewrites | 143 requests/s |
+| 4 KiB publication, disk p50/p95 | 1.17 / 1.52 ms |
+| 4 KiB publication, memory p50/p95 | 0.45 / 0.53 ms |
+| 4 MiB download with four paced readers | 89.75 ms |
+| Peak combined RSS | 105,320 KiB |
+| RTMP, RTMPS and SRT playback plus six-frame decode | 6.06 / 6.12 / 6.05 s |
+
+The transport measurements include starting FFmpeg, probing and decoding. Dedicated transport overhead, separate server RSS and cross-host throughput remain unmeasured. Repeatability depends on CPU and disk contention.
+
+The local matrix ran formatting, Clippy with warnings denied, 29 non-ignored tests, the two service integration tests, the release build and the smoke test. The workflow runs these checks, including MediaMTX and S3 interoperability, on native AMD64 and ARM64. Both runners passed on `37b86ff`. Check the branch's current run for newer commits. [Verified native run](https://github.com/KingIronMan2011/restreamer-core/actions/runs/45775682315) · [Rust branch CI](https://github.com/KingIronMan2011/restreamer-core/actions/workflows/rust.yml?query=branch%3Arust).
 
 `scripts/differential-media.py` passed ten comparisons against a locally running copy of the pinned Go reference. It covers storage discovery, uploads, listing, HEAD, ranges, replacement, alias rule management and missing-file error structure. Legacy public alias authorization can differ when Go IAM controls are enabled. RustSec reported no vulnerable dependencies and two unmaintained transitive crates (`chrono` and `humantime`) without fixed upgrades.
 

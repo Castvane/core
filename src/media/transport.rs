@@ -254,9 +254,14 @@ impl Transport {
         });
         drop(reserved);
         let mut child = command.spawn()?;
+        let deadline = Instant::now() + Duration::from_secs(8);
         let mut started = false;
-        for _ in 0..50 {
-            if child.try_wait()?.is_some() {
+        while Instant::now() < deadline {
+            if let Some(status) = child.try_wait()? {
+                tracing::warn!(
+                    code = status.code(),
+                    "media companion exited during startup"
+                );
                 break;
             }
             if client

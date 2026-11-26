@@ -179,7 +179,7 @@ pub async fn public(State(app): State<Arc<App>>, request: Request) -> Result<Res
                 }
                 let trusted = (mount.kind == "mem" && !media.private && !media.memory_require_auth)
                     || ((mount.kind == "mem" || mount.kind == "s3")
-                        && basic(media, request.headers()));
+                        && basic(media, Some(mount), request.headers()));
 
                 if !trusted {
                     let identity = identify(
@@ -214,7 +214,10 @@ pub async fn public(State(app): State<Arc<App>>, request: Request) -> Result<Res
     if let Some(origin) = allowed_origin {
         cors(response.headers_mut(), origin);
     }
-    if media.private
+    if (media.private
+        || media
+            .mounted(&resolved)
+            .is_ok_and(|(mount, _)| mount.auth.is_some()))
         && let Some(token) = query_token
         && method == Method::GET
         && response.status().is_success()
@@ -241,7 +244,7 @@ fn cors(headers: &mut HeaderMap, origin: HeaderValue) {
     );
 }
 
-fn basic(media: &Media, headers: &HeaderMap) -> bool {
+fn basic(media: &Media, mount: Option<&Mount>, headers: &HeaderMap) -> bool {
     headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -250,8 +253,15 @@ fn basic(media: &Media, headers: &HeaderMap) -> bool {
         .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
         .and_then(|v| String::from_utf8(v).ok())
         .is_some_and(|v| {
-            v.split_once(':')
-                .is_some_and(|(user, password)| media.basic(user, password))
+            v.split_once(':').is_some_and(|(user, password)| {
+                media.basic(user, password)
+                    || mount
+                        .and_then(|mount| mount.auth.as_ref())
+                        .is_some_and(|(name, secret)| {
+                            crate::media::transport::eq(user, name)
+                                && crate::media::transport::eq(password, secret)
+                        })
+            })
         })
 }
 
@@ -263,19 +273,26 @@ async fn authorize_download(
     resolved: &str,
     parameters: &Parameters,
 ) -> Result<(), ApiError> {
-    if !app.media.private {
+    let mount = app.media.mounted(resolved).ok().map(|(mount, _)| mount);
+    if !app.media.private && mount.is_none_or(|mount| mount.auth.is_none()) {
         return Ok(());
     }
     if parameters.token.as_deref().is_some_and(|token| {
         app.media.sessions.validate_token(token, path, source)
             && app.media.sessions.validate_token(token, resolved, source)
-    }) || (basic(&app.media, headers)
-        && app
-            .media
-            .mounted(resolved)
-            .is_ok_and(|(mount, _)| matches!(mount.kind, "mem" | "s3")))
+    }) || (mount.is_some_and(|mount| matches!(mount.kind, "mem" | "s3"))
+        && basic(&app.media, mount, headers))
     {
         return Ok(());
+    }
+    if !headers.get_all(header::AUTHORIZATION).iter().any(|header| {
+        header
+            .to_str()
+            .ok()
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .is_some_and(|token| !token.is_empty())
+    }) {
+        return Err(Error::Forbidden.into());
     }
     let (record, settings) = read_settings(app).await?;
     let identity = identify(app, &record, &settings, headers, source, TokenUse::Access)?;
@@ -326,7 +343,7 @@ pub async fn serve(
     let playlist = public && key.as_str().to_ascii_lowercase().ends_with(".m3u8");
     let dash_manifest = key.as_str().to_ascii_lowercase().ends_with(".mpd");
     let is_manifest = playlist || dash_manifest;
-    let personalised = playlist || media.private || !public;
+    let personalised = playlist || media.private || mount.auth.is_some() || !public;
     let mut response_headers = HeaderMap::new();
     add(&mut response_headers, header::CONTENT_TYPE, mime);
     add(&mut response_headers, header::ETAG, &meta.tag);

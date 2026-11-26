@@ -350,6 +350,13 @@ impl Data {
                     .assignment
                     .as_ref()
                     .is_some_and(|old| old.node == *node && old.expires_ms > *now_ms);
+                if same
+                    && job.assignment.as_ref().is_some_and(|current| {
+                        current.relocate_to.is_some() || *expires_ms <= current.expires_ms
+                    })
+                {
+                    return Applied::Conflict;
+                }
                 if !same
                     && job
                         .assignment
@@ -407,7 +414,13 @@ impl Data {
                 self.collections
                     .entry(Collection::Process)
                     .or_default()
-                    .insert(key.clone(), Record { revision, value });
+                    .insert(
+                        key.clone(),
+                        Record {
+                            revision: *current,
+                            value,
+                        },
+                    );
             }
             Action::Rebalance {
                 key,
@@ -594,19 +607,20 @@ mod tests {
             Applied::Conflict
         ));
         assert!(matches!(
-            apply(&mut data, 7, assignment("first", 5, 2, 13999)),
+            apply(&mut data, 7, assignment("first", 3, 2, 13999)),
             Applied::Conflict
         ));
         assert!(matches!(
-            apply(&mut data, 8, assignment("first", 5, 2, 14000)),
+            apply(&mut data, 8, assignment("first", 3, 2, 14000)),
             Applied::Updated(8)
         ));
+        assert_eq!(data.get(Collection::Process, "first").unwrap().revision, 3);
         assert_eq!(
             data.get(Collection::Process, "first").unwrap().value["assignment"]["epoch"],
             8
         );
         assert!(matches!(
-            apply(&mut data, 9, assignment("first", 5, 1, 14001)),
+            apply(&mut data, 9, assignment("first", 3, 1, 14001)),
             Applied::Conflict
         ));
     }

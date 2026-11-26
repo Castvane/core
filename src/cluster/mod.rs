@@ -1,3 +1,4 @@
+pub(crate) mod diagnostics;
 mod files;
 pub mod model;
 mod network;
@@ -58,6 +59,7 @@ pub struct Rebalance {
 #[serde(deny_unknown_fields)]
 pub struct PeerConfig {
     address: String,
+    playback_origin: Option<String>,
     certificate: PathBuf,
     #[serde(default)]
     node: Node,
@@ -65,6 +67,7 @@ pub struct PeerConfig {
 
 pub struct Peer {
     pub address: String,
+    pub playback_origin: Option<String>,
     pub certificate: CertificateDer<'static>,
     pub node: Node,
 }
@@ -127,7 +130,7 @@ impl Cluster {
         settings: Settings,
         store: &Store,
         media_root: &Path,
-        media: Arc<crate::media::Media>,
+        worker: diagnostics::Worker,
     ) -> Result<Arc<Self>, StartupError> {
         use std::os::unix::fs::PermissionsExt;
         let database = SqliteStore(store.0.clone());
@@ -179,10 +182,28 @@ impl Cluster {
                         .into(),
                 );
             }
+            let playback_origin = peer
+                .playback_origin
+                .as_deref()
+                .map(url::Url::parse)
+                .transpose()?;
+            if playback_origin.as_ref().is_some_and(|origin| {
+                origin.scheme() != "https"
+                    || origin.host().is_none()
+                    || origin.path() != "/"
+                    || !origin.username().is_empty()
+                    || origin.password().is_some()
+                    || origin.query().is_some()
+                    || origin.fragment().is_some()
+            }) {
+                return Err("cluster playback origin must be an HTTPS origin".into());
+            }
             peers.insert(
                 id,
                 Peer {
                     address: address.to_string().trim_end_matches('/').into(),
+                    playback_origin: playback_origin
+                        .map(|origin| origin.origin().ascii_serialization()),
                     certificate,
                     node: peer.node,
                 },
@@ -253,7 +274,7 @@ impl Cluster {
             raft.clone(),
             stop.clone(),
             telemetry.clone(),
-            media,
+            worker,
         ));
         Ok(Arc::new(Self {
             id: settings.id,

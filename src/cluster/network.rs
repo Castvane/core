@@ -189,10 +189,14 @@ pub async fn serve(
     raft: Raft,
     stop: CancellationToken,
     telemetry: super::work::SharedTelemetry,
-    media: Arc<crate::media::Media>,
+    worker: super::diagnostics::Worker,
 ) {
     let Network { peers, cluster, .. } = network;
-    let files = Router::new().nest(VERSION, super::files::routes(raft.clone(), media));
+    let files = Router::new().nest(
+        VERSION,
+        super::files::routes(raft.clone(), worker.media.clone()),
+    );
+    let diagnostics = Router::new().nest(VERSION, super::diagnostics::routes(raft.clone(), worker));
     let routes = Router::new()
         .nest(
             VERSION,
@@ -254,7 +258,8 @@ pub async fn serve(
         )
         .layer(DefaultBodyLimit::max(MAX_MESSAGE))
         .with_state(raft)
-        .merge(files);
+        .merge(files)
+        .merge(diagnostics);
     let slots = Arc::new(Semaphore::new(64));
     let acceptor = TlsAcceptor::from(config);
     loop {

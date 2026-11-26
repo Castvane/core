@@ -234,14 +234,16 @@ impl App {
         )
         .await?;
         let ops = crate::ops::Operations::new(&effective, initial);
-        let cluster = if let Some(settings) = settings_file {
+        let cluster = if let (Some(settings), Some(gate)) = (settings_file, gate) {
             let media_root = tokio::fs::canonicalize(root_path).await?;
+            let worker = crate::cluster::diagnostics::Worker {
+                media: media.clone(),
+                engine: processes.clone(),
+                gate: gate.clone(),
+            };
             let cluster =
-                crate::cluster::Cluster::start(settings, &store, &media_root, media.clone())
-                    .await?;
-            if let Some(gate) = gate {
-                cluster.run_workers(processes.clone(), ops.clone(), media.clone(), gate);
-            }
+                crate::cluster::Cluster::start(settings, &store, &media_root, worker).await?;
+            cluster.run_workers(processes.clone(), ops.clone(), media.clone(), gate);
             Some(cluster)
         } else {
             None

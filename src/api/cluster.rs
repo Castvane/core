@@ -76,6 +76,10 @@ pub fn routes() -> Router<Arc<App>> {
                 "/process/{id}/metadata/{key}",
                 get(process_metadata_get).put(process_metadata_put),
             )
+            .route("/process/{id}/report", get(process_report))
+            .route("/process/{id}/probe", get(process_probe))
+            .route("/process/probe", axum::routing::post(probe_configuration))
+            .route("/process/{id}/playback", get(playback))
             .route("/process/{id}/state", get(process_state))
             .route("/deployments", get(deployments)),
     )
@@ -1026,4 +1030,97 @@ async fn node_file(
     authorized(&app, &actor)?
         .remote_file(id, &storage, Some(&path), request)
         .await
+}
+
+async fn process_report(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+) -> Reply {
+    process_diagnostic(authorized(&app, &actor)?, id, false).await
+}
+
+async fn process_probe(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+) -> Reply {
+    process_diagnostic(authorized(&app, &actor)?, id, true).await
+}
+
+async fn process_diagnostic(cluster: &Cluster, id: String, probe: bool) -> Reply {
+    use crate::cluster::diagnostics::Query;
+    let (_, job) = find_job(cluster, &id).await?;
+    let lease = job.assignment.ok_or(Failure::Unavailable)?;
+    let domain = job.config["domain"].as_str().unwrap_or_default().to_owned();
+    let query = if probe {
+        Query::Probe {
+            domain,
+            id,
+            epoch: lease.epoch,
+        }
+    } else {
+        Query::Report {
+            domain,
+            id,
+            epoch: lease.epoch,
+        }
+    };
+    Ok(Json(cluster.diagnostics(lease.node, query).await?))
+}
+
+async fn probe_configuration(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    input: Result<Json<Value>, JsonRejection>,
+) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let state = cluster.committed().await?;
+    let input = body(input)?;
+    for (id, record) in state.records(Collection::Node) {
+        let Ok(id) = id.parse::<u64>() else {
+            continue;
+        };
+        let node: Node = serde_json::from_value(record.value.clone())?;
+        if node.role.runs_media()
+            && !node.disabled
+            && !node.draining
+            && cluster.report(id).await.is_some()
+        {
+            return Ok(Json(
+                cluster
+                    .diagnostics(
+                        id,
+                        crate::cluster::diagnostics::Query::ProbeConfiguration(input),
+                    )
+                    .await?,
+            ));
+        }
+    }
+    Err(Failure::Unavailable.into())
+}
+
+async fn playback(State(app): StateArg, Extension(actor): Actor, Path(id): Path<String>) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let (_, job) = find_job(cluster, &id).await?;
+    let lease = job.assignment.ok_or(Failure::Unavailable)?;
+    let observed = cluster
+        .report(lease.node)
+        .await
+        .ok_or(Failure::Unavailable)?;
+    if observed
+        .runtime
+        .get(&id)
+        .is_none_or(|runtime| runtime.epoch != lease.epoch || runtime.state != "running")
+    {
+        return Err(Failure::Unavailable.into());
+    }
+    let origin = cluster
+        .peers
+        .get(&lease.node)
+        .and_then(|peer| peer.playback_origin.as_ref())
+        .ok_or(Failure::Missing)?;
+    Ok(Json(
+        json!({"node":lease.node,"epoch":lease.epoch,"http_origin":origin}),
+    ))
 }

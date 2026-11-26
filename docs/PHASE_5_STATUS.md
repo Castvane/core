@@ -14,7 +14,7 @@ Combined nodes vote and run jobs. Control-only voters schedule without executing
 
 ## State, placement and fencing
 
-Process definitions, desired state, assignments, epochs, reservations, managed identities and policies, zones, aliases, KV values and expiring locks are committed through Raft. Resource observations expire independently of the log. Mandatory node, label, zone, CPU, memory, storage and protocol constraints precede preference ranking. Hardware encoder compatibility combines operator configuration, device visibility and the installed FFmpeg inventory. GPU memory reservations match reported device identifiers. Concurrent placement requests are checked against existing reservations in the applied state machine.
+Process definitions, desired state, assignments, epochs, reservations, managed identities and policies, zones, aliases, KV values and expiring locks are committed through Raft. Resource observations expire independently of the log. Mandatory node, label, zone, CPU, memory, storage and protocol constraints precede preference ranking. Hardware encoder compatibility combines operator configuration, device visibility and the installed FFmpeg inventory. GPU memory reservations match reported device identifiers. Concurrent placement requests are checked against existing reservations in the applied state machine. Lease renewals update assignment state without changing the process definition revision.
 
 The worker starts a configured process only while it holds a matching committed assignment and a valid lease. The process supervisor rechecks the deadline while the process is running. The leader waits through the prior lease and a safety interval before assigning a different owner. Remote progress is accepted only for a matching epoch. Unreachable nodes lose lease renewals. Optional CPU-based rebalancing also retires leases and records a single destination and cooldown in Raft. Draining blocks new placements and old leases expire. Relocation restarts a process at its destination. These guarantees assume synchronized clocks and a responsive supervisor. External publishers and destinations may require their own fencing.
 
@@ -28,7 +28,7 @@ Cluster paths are under /api/v3/cluster. Administrator authorization and the exi
 | --- | --- |
 | Topology | GET root, health, snapshot indices, deployments, node list, node detail and node state |
 | Membership | POST preprovisioned node enrollment and PUT replacement voter set; PUT node drain and disable |
-| Process | GET, POST, PUT and DELETE definitions; configuration, sampled state and metadata; command and relocation PUT |
+| Process | GET, POST, PUT and DELETE definitions; configuration, sampled state, reports, probe, playback origin and metadata; command and relocation PUT |
 | Filesystem | Node mount listing, ranged GET, HEAD, PUT up to 1 MiB, and DELETE |
 | IAM | List, create, update and delete managed identities; list and replace policies |
 | Zones and aliases | Zone CRUD and ordered alias/rule operations |
@@ -51,8 +51,8 @@ Manual UI acceptance remains open. Test each pinned UI against a disposable clus
 - Targeted leadership transfer, full leave and learner removal workflows, time-limited enrollment and live identity rotation.
 - Memory and GPU pressure rebalancing, pipeline affinity and failure-domain separation, relocation cancellation and dry-run analysis, and per-device encoder and decoder session limits.
 - Distributed certificate issuance and renewal leadership. Cluster mode uses externally coordinated public TLS certificates and declines built-in automatic ACME.
-- Automatic worker playback URLs, cross-node process references, automatic zone routing, aggregate filesystem views and remote copy/move.
-- Full Go cluster API parity, including original snapshot downloads and shapes, remote process report and probe, distributed event subscriptions, and additional legacy node and database routes. The Go /v1/* wire protocol and mixed Go/Rust Raft membership are outside scope.
+- Legacy playback redirects, cross-node process references, automatic zone routing, aggregate filesystem views and remote copy/move.
+- Full Go cluster API parity, including original snapshot downloads and shapes, distributed event subscriptions, and additional legacy node and database routes. The Go /v1/* wire protocol and mixed Go/Rust Raft membership are outside scope.
 - Hardened backup and disaster recovery, upgrade compatibility, additional packet loss and latency tests, larger topology and hardware validation, and checked Docker Compose deployment examples.
 
 Phase 6 retains release distribution, GraphQL, final production acceptance, and tested Go import and rollback.

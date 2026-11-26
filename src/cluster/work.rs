@@ -22,18 +22,26 @@ use super::{
 };
 
 #[derive(Default)]
-pub struct Gate(RwLock<BTreeMap<Key, Instant>>);
+pub struct Gate(RwLock<BTreeMap<Key, (Instant, u64)>>);
 
 impl Gate {
     pub fn allows(&self, config: &Config) -> bool {
         self.0.read().ok().is_some_and(|leases| {
-            leases.iter().any(|((domain, id), expiry)| {
+            leases.iter().any(|((domain, id), (expiry, _))| {
                 domain == &config.domain && id == &config.id && *expiry > Instant::now()
             })
         })
     }
 
-    fn replace(&self, leases: BTreeMap<Key, Instant>) {
+    pub fn owns(&self, key: &Key, epoch: u64) -> bool {
+        self.0.read().ok().is_some_and(|leases| {
+            leases
+                .get(key)
+                .is_some_and(|(expiry, owned)| *owned == epoch && *expiry > Instant::now())
+        })
+    }
+
+    fn replace(&self, leases: BTreeMap<Key, (Instant, u64)>) {
         if let Ok(mut current) = self.0.write() {
             *current = leases;
         }
@@ -110,7 +118,7 @@ impl Cluster {
                                     && (200..=30_000).contains(&remaining)
                                 {
                                     let domain = job.config["domain"].as_str().unwrap_or_default().to_owned();
-                                    deadlines.insert((domain,id.clone()),Instant::now() + Duration::from_millis(remaining));
+                                    deadlines.insert((domain,id.clone()),(Instant::now() + Duration::from_millis(remaining),assignment.epoch));
                                     targets.insert(id,job);
                                 }
                             }

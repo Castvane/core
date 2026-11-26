@@ -203,6 +203,7 @@ def exercise(binary, root):
         return {
             node: {"address": f"https://127.0.0.1:{links[source, node].port}",
                    "certificate": str(root / f"{node}.pem"),
+                   "playback_origin": f"https://worker-{node}.example.test",
                    "node": {"name": f"node-{node}", "role": {1: "control", 4: "worker"}.get(node, "combined")}}
             for node in ids
         }
@@ -233,6 +234,13 @@ def exercise(binary, root):
                     assert b"200 OK" not in peer.recv(1024)
         except (OSError, ssl.SSLError):
             pass
+
+        context.load_cert_chain(root / "1.pem", root / "1.key")
+        with socket.create_connection(("127.0.0.1", raft_ports[0]), timeout=3) as raw:
+            with context.wrap_socket(raw, server_hostname="127.0.0.1") as peer:
+                peer.sendall(b"POST /internal/cluster/v1/telemetry HTTP/1.1\r\nHost: localhost\r\n"
+                             b"X-Castvane-Cluster: different-cluster\r\nContent-Length: 0\r\n\r\n")
+                assert b"403 Forbidden" in peer.recv(1024)
 
         started = time.monotonic()
         first = leader_node.call("PUT", "/db/kv/fixture", {"value": "initial", "expected": 0})
@@ -290,6 +298,11 @@ def exercise(binary, root):
             "output": [{"id": "output", "address": "-", "options": ["-threads", "1", "-f", "null"]}],
         })
         original = eventually(lambda: media_running(leader_node, 4), "learner never ran FFmpeg")
+        assert leader_node.call("GET", "/process/video/playback")["http_origin"] == "https://worker-4.example.test"
+        report = leader_node.call("GET", "/process/video/report")
+        assert isinstance(report["history"], list)
+        probe = leader_node.call("GET", "/process/video/probe")
+        assert probe["streams"][0]["type"] == "video"
         print(f"remote deployment {time.monotonic() - started:.3f}s", flush=True)
         started = time.monotonic()
         leader_node.call("PUT", "/reallocation", {"id": "video", "node": 2})

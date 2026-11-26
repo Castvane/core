@@ -1,6 +1,6 @@
 # Phase 1 status
 
-Phase 1 implementation and automated verification are complete for the Rust API foundation. Manual browser acceptance for existing UIs remains open.
+Phase 1 implementation and automated verification are complete for the Rust API foundation. Manual browser acceptance for existing UIs remains open. See the [browser regression results](UI_REGRESSION.md) and the [current API matrix](API_COMPATIBILITY.md) for behavior added since Phase 1.
 
 ## Implementation
 
@@ -26,7 +26,7 @@ Built-in defaults form the base. Stored settings overlay defaults, and environme
 | API policy | `CORE_API_READ_ONLY`, `CORE_API_ACCESS_HTTP_ALLOW`, `CORE_API_ACCESS_HTTP_BLOCK`. The HTTPS variants are represented for later TLS support |
 | Deferred feature settings | `CORE_API_AUTH_AUTH0_ENABLE`, `CORE_STORAGE_CORS_ORIGINS`, `CORE_FFMPEG_BINARY`, `CORE_ROUTER_UI_PATH`, `CORE_TLS_ENABLE`, `CORE_RTMP_ENABLE`, `CORE_SRT_ENABLE`, `CORE_METRICS_ENABLE`, `CORE_CLUSTER_ENABLE` |
 
-Set a 12–1024 byte `CORE_API_AUTH_PASSWORD` and optionally `CORE_API_AUTH_USERNAME` when starting a new authenticated instance. Credentials are persisted as an Argon2id hash, and supplying a different startup password rotates it. With no account configured, a local client can provision an administrator through configuration PUT. An external listener requires authentication or explicit `CORE_API_AUTH_ENABLE=false`. The loopback bypass trusts the socket peer. When proxying requests to a loopback listener, configure authentication and keep `CORE_API_AUTH_DISABLE_LOCALHOST=false`. Forwarded IP headers are ignored.
+Set a 12–1024 byte `CORE_API_AUTH_PASSWORD` and optionally `CORE_API_AUTH_USERNAME` when starting a new authenticated instance. Credentials are persisted as an Argon2id hash, and supplying a different startup password rotates it. With no account configured, a local client can provision an administrator through configuration PUT. An external listener requires authentication or explicit `CORE_API_AUTH_ENABLE=false`. The loopback bypass trusts the socket peer. When proxying requests to a loopback listener, configure authentication and keep `CORE_API_AUTH_DISABLE_LOCALHOST=false`. Phase 4 added explicitly trusted proxy addresses and forwarded protocol handling. See [Phase 4 deployment](PHASE_4_STATUS.md#deployment).
 
 The signing key is either generated and stored in a private database file or supplied at startup with `CORE_API_AUTH_JWT_SECRET` (minimum 32 bytes). The override stays outside the database and must be supplied on every restart to retain sessions signed with that value. Password or effective username changes through PUT revoke existing tokens. Login attempts are limited per peer and globally, and Argon2id work runs in a bounded blocking pool. The path, body and authorization header are never logged. Logs contain matched route templates and request IDs.
 

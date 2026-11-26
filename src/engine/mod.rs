@@ -112,6 +112,17 @@ impl Entry {
     pub fn job(&self) -> Arc<Job> {
         self.updates.borrow().job.clone()
     }
+    pub(crate) fn telemetry(&self) -> (Execution, Option<u32>, u32, Usage, Progress) {
+        let state = progress::lock(&self.runtime);
+        (
+            state.execution,
+            state.pid,
+            state.restart_count,
+            state.usage.clone(),
+            state.progress.clone(),
+        )
+    }
+
     pub fn snapshot(&self) -> Runtime {
         lock(&self.runtime).clone()
     }

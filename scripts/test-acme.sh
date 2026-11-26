@@ -82,6 +82,7 @@ with (home / "pebble.json").open("w") as out:
         "httpPort": http,
         "tlsPort": tls,
         "domainBlocklist": [],
+        "profiles": {"default": {"description": "Short-lived test certificates", "validityPeriod": 86400}},
         "retryAfter": {"authz": 1, "order": 1},
     }}, out)
 PY
@@ -105,7 +106,7 @@ done
 [[ "$ready" == true ]] || { cat "$temp/acme.log" "$temp/dns.log" >&2; exit 1; }
 
 start_core() {
-    CORE_BIND_ADDR="127.0.0.1:$http_port" CORE_DATABASE_PATH="$temp/node.sqlite" \
+    RUST_LOG=warn CORE_BIND_ADDR="127.0.0.1:$http_port" CORE_DATABASE_PATH="$temp/node.sqlite" \
         CORE_STORAGE_DISK_DIR="$temp/media" CORE_HOST_NAME=castvane.test CORE_HOST_AUTO=false \
         CORE_TLS_ENABLE=true CORE_TLS_AUTO=true CORE_TLS_STAGING=true CORE_TLS_ADDRESS="127.0.0.1:$tls_port" \
         CORE_TLS_ACME_AGREE=true CORE_TLS_EMAIL=admin@castvane.test CORE_TLS_ACME_STORAGE="$temp/issued" \
@@ -126,19 +127,51 @@ check_certificate() {
     cat "$temp/core.log" "$temp/acme.log" >&2
     return 1
 }
+serial() {
+    timeout 3 openssl s_client -connect "127.0.0.1:$tls_port" -servername castvane.test \
+        </dev/null 2>/dev/null | openssl x509 -noout -serial 2>/dev/null
+}
+stop_core() {
+    kill -TERM "$core_pid"
+    wait "$core_pid"
+    core_pid=
+}
 start_core
 check_certificate 200
+initial=$(serial)
 [[ $(stat -c %a "$temp/issued/certificate.json") == 600 ]]
 [[ $(stat -c %a "$temp/issued/custom.json") == 600 ]]
-kill -TERM "$core_pid"
-wait "$core_pid"
-core_pid=
-kill -KILL "$acme_pid"
+stop_core
+
+# The short-lived certificate is within the renewal window at the next start.
+start_core
+renewed=
+for _ in {1..200}; do
+    current=$(serial) || current=
+    if [[ -n "$current" && "$current" != "$initial" ]]; then
+        renewed=$current
+        break
+    fi
+    sleep 0.25
+done
+[[ -n "$renewed" ]] || { cat "$temp/core.log" "$temp/acme.log" >&2; exit 1; }
+check_certificate 50
+stop_core
+kill -TERM "$acme_pid"
 wait "$acme_pid" 2>/dev/null || true
 acme_pid=
+# Force a local renewal failure so this check does not wait for ACME network retry backoff.
+mv "$temp/ca.pem" "$temp/offline-ca.pem"
 start_core
 check_certificate 50
-kill -TERM "$core_pid"
-wait "$core_pid"
-core_pid=
-printf 'ACME HTTP-01 issuance, trusted HTTPS, and offline certificate restart passed.\n'
+[[ $(serial) == "$renewed" ]]
+for _ in {1..40}; do
+    if grep -q 'ACME issuance or renewal failed' "$temp/core.log"; then
+        break
+    fi
+    sleep 0.25
+done
+grep -q 'ACME issuance or renewal failed' "$temp/core.log" || { cat "$temp/core.log" >&2; exit 1; }
+[[ $(serial) == "$renewed" ]]
+stop_core
+printf 'ACME HTTP-01 issuance, renewal, and fallback with the issuer offline passed.\n'

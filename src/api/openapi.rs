@@ -22,7 +22,7 @@ pub async fn document() -> Json<Value> {
         "paths": {
             "/ping":{"get":{"summary":"Check liveness","responses":{"200":{"description":"Alive","content":{"text/plain":{"schema":{"const":"pong"}}}}}}},
             "/api":{"get":{"summary":"Discover node and available features","security":[{},{"bearer":[]}],"responses":{"200":{"description":"Discovery document","content":{"application/json":{"schema":{"type":"object","required":["app","auths","version","capabilities"]}}}},"401":error(),"403":error()}}},
-            "/api/login":{"post":{"summary":"Authenticate the local administrator","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["username","password"],"properties":{"username":{"type":"string"},"password":{"type":"string","writeOnly":true}}}}}},"responses":{"200":tokens(true),"403":error(),"429":error()}}},
+            "/api/login":{"post":{"summary":"Authenticate a local identity","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["username","password"],"properties":{"username":{"type":"string"},"password":{"type":"string","writeOnly":true}}}}}},"responses":{"200":tokens(true),"403":error(),"429":error()}}},
             "/api/login/refresh":{"get":{"summary":"Issue an access token using a refresh token","security":[{"bearer":[]}],"responses":{"200":tokens(false),"401":error(),"403":error()}}},
             "/api/v3/config":{
                 "get":{"summary":"Read effective configuration","security":[{"bearer":[]}],"responses":{"200":{"description":"Configuration and timestamps","content":{"application/json":{"schema":{"type":"object","required":["config","created_at","updated_at","loaded_at","overrides"]}}}},"401":error(),"403":error()}},
@@ -35,39 +35,236 @@ pub async fn document() -> Json<Value> {
             "schemas":{"Error":{"type":"object","required":["code","message","details"],"properties":{"code":{"type":"integer"},"message":{"type":"string"},"details":{"type":"array","items":{"type":"string"}}}}}
         }
     });
-    for (path, methods) in [
-        ("/skills", &["get"][..]),
-        ("/skills/reload", &["get"][..]),
-        ("/process", &["get", "post"][..]),
-        ("/process/{id}", &["get", "put", "delete"][..]),
-        ("/process/{id}/config", &["get"][..]),
-        ("/process/{id}/state", &["get"][..]),
-        ("/process/{id}/report", &["get", "put"][..]),
-        ("/process/{id}/command", &["put"][..]),
-        ("/process/probe", &["post"][..]),
-        ("/process/validate", &["post"][..]),
-        ("/process/{id}/probe", &["get"][..]),
-        ("/process/{id}/metadata", &["get"][..]),
-        ("/process/{id}/metadata/{key}", &["get", "put"][..]),
-        ("/metadata", &["get"][..]),
-        ("/metadata/{key}", &["get", "put"][..]),
-        ("/report/process", &["get"][..]),
+    process_paths(&mut spec);
+    media_paths(&mut spec);
+    operations_paths(&mut spec);
+    Json(spec)
+}
+
+fn process_paths(spec: &mut Value) {
+    let report_search = &[
+        "id",
+        "reference",
+        "idpattern",
+        "refpattern",
+        "ownerpattern",
+        "domainpattern",
+        "zonepattern",
+        "state",
+        "from",
+        "to",
+        "offset",
+        "limit",
+    ][..];
+    let list_filters = &[
+        "id",
+        "reference",
+        "idpattern",
+        "refpattern",
+        "ownerpattern",
+        "domainpattern",
+        "zonepattern",
+        "filter",
+        "offset",
+        "limit",
+    ][..];
+    for (path, method, query, request, response) in [
+        ("/skills", "get", &[][..], "", "Skills"),
+        ("/skills/reload", "get", &[][..], "", "Skills"),
+        ("/process", "get", list_filters, "", "Processes"),
+        (
+            "/process",
+            "post",
+            &[][..],
+            "ProcessConfiguration",
+            "ProcessConfiguration",
+        ),
+        (
+            "/process/{id}",
+            "get",
+            &["domain", "filter"][..],
+            "",
+            "Process",
+        ),
+        (
+            "/process/{id}",
+            "put",
+            &["domain", "force"][..],
+            "ProcessConfiguration",
+            "ProcessConfiguration",
+        ),
+        (
+            "/process/{id}",
+            "delete",
+            &["domain", "purge"][..],
+            "",
+            "OK",
+        ),
+        (
+            "/process/{id}/config",
+            "get",
+            &["domain"][..],
+            "",
+            "ProcessConfiguration",
+        ),
+        (
+            "/process/{id}/state",
+            "get",
+            &["domain"][..],
+            "",
+            "ProcessState",
+        ),
+        (
+            "/process/{id}/report",
+            "get",
+            &["domain", "created_at", "exited_at"][..],
+            "",
+            "ProcessReport",
+        ),
+        (
+            "/process/{id}/report",
+            "put",
+            &["domain"][..],
+            "ReportImport",
+            "OK",
+        ),
+        (
+            "/process/{id}/command",
+            "put",
+            &["domain"][..],
+            "ProcessCommand",
+            "OK",
+        ),
+        (
+            "/process/probe",
+            "post",
+            &[][..],
+            "ProcessConfiguration",
+            "Probe",
+        ),
+        (
+            "/process/validate",
+            "post",
+            &[][..],
+            "ProcessConfiguration",
+            "ProcessConfiguration",
+        ),
+        ("/process/{id}/probe", "get", &["domain"][..], "", "Probe"),
+        (
+            "/process/{id}/metadata",
+            "get",
+            &["domain"][..],
+            "",
+            "Metadata",
+        ),
+        (
+            "/process/{id}/metadata/{key}",
+            "get",
+            &["domain"][..],
+            "",
+            "Document",
+        ),
+        (
+            "/process/{id}/metadata/{key}",
+            "put",
+            &["domain"][..],
+            "Document",
+            "Document",
+        ),
+        ("/metadata", "get", &[][..], "", "Metadata"),
+        ("/metadata/{key}", "get", &[][..], "", "Document"),
+        ("/metadata/{key}", "put", &[][..], "Document", "Document"),
+        ("/report/process", "get", report_search, "", "ReportSearch"),
     ] {
         let parameters: Vec<_> = ["id", "key"]
             .into_iter()
             .filter(|name| path.contains(&format!("{{{name}}}")))
             .map(|name| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}}))
+            .chain(query.iter().map(|name| {
+                let schema = match *name {
+                    "offset" | "limit" => json!({"type":"integer","minimum":0}),
+                    "created_at" | "exited_at" | "from" | "to" => {
+                        json!({"type":"integer","format":"int64"})
+                    }
+                    "force" => json!({"type":"string","enum":["restart"]}),
+                    "purge" => json!({"type":"boolean","default":true}),
+                    _ => json!({"type":"string"}),
+                };
+                json!({"name":name,"in":"query","schema":schema})
+            }))
             .collect();
-        for method in methods {
-            spec["paths"][format!("/api/v3{path}")][*method] = json!({
-                "security":[{"bearer":[]}],"parameters":parameters,
-                "responses":{"200":{"description":"Legacy v3 response"},"400":error(),"403":error(),"404":error(),"409":error(),"503":error()}
-            });
+        let mut operation = json!({
+            "tags":["Process engine"], "security":[{"bearer":[]}], "parameters":parameters,
+            "responses":{"200":if response == "OK" { ok() } else { json!({
+                "description":"Legacy v3 response", "content":schema_content(response)
+            }) },"400":error(),"401":error(),"403":error(),"404":error(),"409":error(),"503":error()}
+        });
+        if !request.is_empty() {
+            operation["requestBody"] = json!({"required":true,"content":schema_content(request)});
         }
+        if path == "/process" && method == "get" {
+            operation["responses"]["413"] = error();
+        }
+        spec["paths"][format!("/api/v3{path}")][method] = operation;
     }
-    media_paths(&mut spec);
-    operations_paths(&mut spec);
-    Json(spec)
+    let schemas = &mut spec["components"]["schemas"];
+    schemas["Document"] = json!({});
+    schemas["Metadata"] = json!({"type":["object","null"]});
+    schemas["ProcessEndpoint"] = json!({"type":"object","properties":{
+        "id":{"type":"string"},"address":{"type":"string"},
+        "options":{"type":["array","null"],"items":{"type":"string"}},
+        "cleanup":{"type":["array","null"],"items":{"type":"object"}}
+    }});
+    schemas["ProcessConfiguration"] = json!({"type":"object","properties":{
+        "id":{"type":"string"},"owner":{"type":"string"},"domain":{"type":"string"},"zone":{"type":"string"},
+        "binary":{"type":"string"},"type":{"const":"ffmpeg"},"reference":{"type":"string"},
+        "input":{"type":["array","null"],"items":{"$ref":"#/components/schemas/ProcessEndpoint"}},
+        "output":{"type":["array","null"],"items":{"$ref":"#/components/schemas/ProcessEndpoint"}},
+        "options":{"type":["array","null"],"items":{"type":"string"}},
+        "reconnect":{"type":"boolean"},"autostart":{"type":"boolean"},
+        "reconnect_delay_seconds":{"type":"integer","minimum":0},"reconnect_max_retries":{"type":"integer","minimum":0},
+        "stale_timeout_seconds":{"type":"integer","minimum":0},"runtime_duration_seconds":{"type":"integer","minimum":0},
+        "scheduler":{"type":"string","description":"Cron expression or RFC3339 timestamp"},
+        "limits":{"type":"object"},"metadata":{"type":"object"},
+        "log_patterns":{"type":["array","null"],"items":{"type":"string"}}
+    }});
+    schemas["ProcessCommand"] = json!({"type":"object","required":["command"],"properties":{
+        "command":{"enum":["start","stop","reload","restart"]},"reason":{"type":"string"}
+    }});
+    schemas["ProcessState"] = json!({"type":"object","required":["order","exec","progress","resources"],"properties":{
+        "order":{"enum":["start","stop"]},"exec":{"enum":["finished","starting","running","finishing","failed","killed"]},
+        "progress":{"type":"object"},"resources":{"type":"object"},"pid":{"type":"integer"},
+        "limit_mode":{"enum":["hard","soft","none"]}
+    }});
+    schemas["ProcessReport"] = json!({"type":"object","required":["history"],"properties":{
+        "history":{"type":"array","items":{"type":"object"}}
+    }});
+    schemas["ReportImport"] = json!({"type":"object","properties":{
+        "history":{"type":"array","items":{"type":"object"}}
+    }});
+    schemas["Process"] = json!({"type":"object","required":["id","type"],"properties":{
+        "id":{"type":"string"},"domain":{"type":"string"},"type":{"const":"ffmpeg"},
+        "config":{"$ref":"#/components/schemas/ProcessConfiguration"},
+        "state":{"$ref":"#/components/schemas/ProcessState"},
+        "report":{"$ref":"#/components/schemas/ProcessReport"},
+        "metadata":{"type":"object"}
+    }});
+    schemas["Processes"] = json!({"type":"array","items":{"$ref":"#/components/schemas/Process"}});
+    schemas["ReportSearch"] = json!({"type":"array","items":{"type":"object","properties":{
+        "id":{"type":"string"},"domain":{"type":"string"},"reference":{"type":"string"},
+        "exit_state":{"type":"string"},"created_at":{"type":"integer"},"exited_at":{"type":"integer"}
+    }}});
+    schemas["Probe"] = json!({"type":"object","properties":{
+        "streams":{"type":"array","items":{"type":"object"}},"log":{"type":"array","items":{"type":"string"}}
+    }});
+    schemas["Skills"] = json!({"type":"object","properties":{
+        "ffmpeg":{"type":"object","properties":{"version":{"type":"string"},"configuration":{"type":"string"}}},
+        "ffprobe_available":{"type":"boolean"},"ffprobe_version":{"type":["string","null"]},"resource_monitor":{"type":"object"}
+    }});
+}
+
+fn schema_content(schema: &str) -> Value {
+    json!({"application/json":{"schema":{"$ref":format!("#/components/schemas/{schema}")}}})
 }
 
 fn media_paths(spec: &mut Value) {
@@ -226,10 +423,21 @@ fn operations_paths(spec: &mut Value) {
         ("/api/v3/resources", &["get"][..]),
         ("/api/v3/audit", &["get"][..]),
     ] {
+        let query = match path {
+            "/api/v3/log" => &["format", "component"][..],
+            "/api/v3/events/media/{kind}" => &["glob"][..],
+            "/api/v3/audit" => &["after"][..],
+            _ => &[],
+        };
         let parameters: Vec<_> = ["name", "id", "kind"]
             .into_iter()
             .filter(|name| path.contains(&format!("{{{name}}}")))
             .map(|name| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}}))
+            .chain(query.iter().map(|name| {
+                json!({"name":name,"in":"query","schema":{"type":
+                    if *name == "after" {"integer"} else {"string"}
+                }})
+            }))
             .collect();
         for method in methods {
             let mut operation = json!({
@@ -245,17 +453,20 @@ fn operations_paths(spec: &mut Value) {
                 ("/api/v3/iam/user/{name}/policy", "put") => Some("IdentityPolicies"),
                 ("/api/v3/zone", "post") | ("/api/v3/zone/{id}", "put") => Some("ZoneWrite"),
                 ("/api/v3/metrics", "post") => Some("MetricsQuery"),
+                ("/api/v3/events" | "/api/v3/events/log", "post") => Some("LogEventFilters"),
+                ("/api/v3/events/process", "post") => Some("ProcessEventFilters"),
                 _ => None,
             };
             if let Some(schema) = schema {
-                operation["requestBody"] = json!({"required":true,"content":{"application/json":
-                    {"schema":{"$ref":format!("#/components/schemas/{schema}")}}}});
+                operation["requestBody"] = json!({"required":!path.starts_with("/api/v3/events"),"content":schema_content(schema)});
             }
             if path.starts_with("/api/v3/events") {
-                operation["responses"]["200"]["content"] = json!({
-                    "application/x-json-stream": {"schema":{"type":"string"}},
-                    "text/event-stream":{"schema":{"type":"string"}}
-                });
+                operation["responses"]["200"]["content"] =
+                    json!({"application/x-json-stream":{"schema":{"type":"string"}}});
+                if matches!(path, "/api/v3/events" | "/api/v3/events/log") {
+                    operation["responses"]["200"]["content"]["text/event-stream"] =
+                        json!({"schema":{"type":"string"}});
+                }
             }
             if path == "/metrics" {
                 operation["responses"]["200"]["content"] =
@@ -265,6 +476,30 @@ fn operations_paths(spec: &mut Value) {
         }
     }
     let schemas = &mut spec["components"]["schemas"];
+    for (name, fields) in [
+        (
+            "LogEventFilters",
+            &["event", "message", "level", "caller", "core_id"][..],
+        ),
+        (
+            "ProcessEventFilters",
+            &["pid", "domain", "type", "core_id"][..],
+        ),
+    ] {
+        let mut properties = serde_json::Map::new();
+        for field in fields {
+            properties.insert((*field).to_owned(), json!({"type":"string"}));
+        }
+        if name == "LogEventFilters" {
+            properties.insert(
+                "data".into(),
+                json!({"type":"object","additionalProperties":{"type":"string"}}),
+            );
+        }
+        schemas[name] = json!({"type":"object","properties":{"filters":{"type":"array","maxItems":32,
+            "items":{"type":"object","properties":properties}
+        }}});
+    }
     schemas["IdentityWrite"] = json!({"type":"object","properties":{
         "name":{"type":"string"},"alias":{"type":"string"},"superuser":{"type":"boolean"},"active":{"type":"boolean"},
         "policies":{"$ref":"#/components/schemas/IdentityPolicies"},

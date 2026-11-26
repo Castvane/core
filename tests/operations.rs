@@ -708,3 +708,146 @@ async fn benchmark_parallel_management_and_metrics() {
     );
     node.app.close().await;
 }
+
+#[tokio::test]
+async fn legacy_operations_filters_and_process_progress() {
+    let dir = TempDir::new().unwrap();
+    let node = Node::open(&dir, &[("CORE_METRICS_ENABLE", "true")]).await;
+    node.call(
+        "POST",
+        "/api/v3/events/log",
+        None,
+        Some(json!({"filters":[{"event":"application","message":"["}]})),
+        400,
+    )
+    .await;
+    node.call(
+        "POST",
+        "/api/v3/events/process",
+        None,
+        Some(json!({"filters":[{"type":"("}]})),
+        400,
+    )
+    .await;
+
+    let mut logs = node.raw("POST", "/api/v3/events/log", None, Some(json!({
+        "filters":[{"event":"APPLICATION","message":"^fixture (ready|stopping)$","level":"^INFO$"}]
+    }))).await.into_body().into_data_stream();
+    assert!(
+        logs.next()
+            .await
+            .unwrap()
+            .unwrap()
+            .starts_with(b":keepalive")
+    );
+    let subscriber = tracing_subscriber::registry().with(node.app.capture_logs());
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!(target: "restreamer_core::test", "other record");
+        tracing::info!(target: "restreamer_core::test", "Fixture ready");
+    });
+    let line = tokio::time::timeout(Duration::from_secs(2), logs.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let line = std::str::from_utf8(&line).unwrap();
+    assert!(line.starts_with("event: application\ndata: "));
+    let event: Value =
+        serde_json::from_str(line.lines().nth(1).unwrap().strip_prefix("data: ").unwrap()).unwrap();
+    assert_eq!(event["message"], "Fixture ready");
+    assert!(event["ts"].as_i64().unwrap() < 10_000_000_000);
+
+    let mut events = node
+        .raw(
+            "POST",
+            "/api/v3/events/process",
+            None,
+            Some(json!({
+                "filters":[{"pid":"^PROGRESS-[a-z]+$","domain":"^tenant$","type":"^progress$"}]
+            })),
+        )
+        .await
+        .into_body()
+        .into_data_stream();
+    assert_eq!(
+        events.next().await.unwrap().unwrap(),
+        "{\"type\":\"keepalive\"}\n"
+    );
+    let mut config = job("progress-demo", "$default", 0);
+    config["autostart"] = json!(true);
+    config["input"][0]["options"] = json!(["-re", "-f", "lavfi"]);
+    node.call("POST", "/api/v3/process", None, Some(config), 200)
+        .await;
+    let progress = tokio::time::timeout(Duration::from_secs(12), async {
+        loop {
+            let line = events.next().await.unwrap().unwrap();
+            let event: Value = serde_json::from_slice(&line).unwrap();
+            if event["type"] != "keepalive" {
+                break event;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(progress["pid"], "progress-demo");
+    assert_eq!(progress["type"], "progress");
+    assert!(progress["progress"]["time"].as_f64().unwrap() > 0.0);
+    assert!(progress["progress"]["input"].is_null());
+    let metric = node
+        .call(
+            "POST",
+            "/api/v3/metrics",
+            None,
+            Some(json!({
+                "metrics":[{"name":"restream_state","labels":{"state":"runn*"}}]
+            })),
+            200,
+        )
+        .await;
+    let rows = metric["metrics"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["labels"], json!({"state":"running"}));
+    assert_eq!(rows[0]["values"][0]["value"], 1.0);
+    drop((logs, events));
+    node.app.close().await;
+}
+
+#[tokio::test]
+async fn revoking_an_administrator_closes_their_live_event_stream() {
+    let dir = TempDir::new().unwrap();
+    let node = Node::open(&dir, &[("CORE_API_AUTH_PASSWORD", ROOT)]).await;
+    let (root, _) = node.login("admin", ROOT).await;
+    node.call(
+        "POST",
+        "/api/v3/iam/user",
+        Some(&root),
+        Some(json!({"name":"delegate","superuser":true,"auth":{"api":{"userpass":PASSWORD}}})),
+        200,
+    )
+    .await;
+    let (delegate, _) = node.login("delegate", PASSWORD).await;
+    let mut body = node
+        .raw("POST", "/api/v3/events/process", Some(&delegate), None)
+        .await
+        .into_body()
+        .into_data_stream();
+    assert_eq!(
+        body.next().await.unwrap().unwrap(),
+        "{\"type\":\"keepalive\"}\n"
+    );
+    node.call(
+        "PUT",
+        "/api/v3/iam/user/delegate/revoke",
+        Some(&root),
+        None,
+        200,
+    )
+    .await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(7), body.next())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    node.app.close().await;
+}

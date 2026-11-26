@@ -26,13 +26,24 @@ pub struct Event {
     pub domain: String,
     pub message: Option<String>,
     pub level: &'static str,
+    pub progress: Option<Box<crate::engine::Progress>>,
 }
 
 #[derive(Serialize)]
 pub struct Metrics {
     pub ts: i64,
     pub values: BTreeMap<&'static str, f64>,
+    pub process_states: [u32; 6],
 }
+
+pub const PROCESS_STATES: [crate::engine::Execution; 6] = [
+    crate::engine::Execution::Finished,
+    crate::engine::Execution::Starting,
+    crate::engine::Execution::Running,
+    crate::engine::Execution::Finishing,
+    crate::engine::Execution::Failed,
+    crate::engine::Execution::Killed,
+];
 
 pub const METRICS: &[(&str, &str)] = &[
     (
@@ -113,6 +124,22 @@ pub const METRICS: &[(&str, &str)] = &[
     ),
 ];
 
+type GpuMetric = (&'static str, fn(&resources::Gpu) -> Option<f64>);
+
+const GPU_METRICS: &[GpuMetric] = &[
+    ("gpu_usage", |gpu| gpu.utilization),
+    ("gpu_encoder", |gpu| gpu.encoder),
+    ("gpu_decoder", |gpu| gpu.decoder),
+    ("gpu_mem_total", |gpu| {
+        gpu.memory_bytes.map(|bytes| bytes as f64)
+    }),
+    ("gpu_mem_free", |gpu| {
+        gpu.memory_bytes
+            .zip(gpu.memory_used_bytes)
+            .map(|(total, used)| total.saturating_sub(used) as f64)
+    }),
+];
+
 pub struct Operations {
     since: Instant,
     pub stop: CancellationToken,
@@ -129,6 +156,8 @@ pub struct Operations {
     in_flight: AtomicU64,
     connections: AtomicU64,
     process_failures: AtomicU64,
+    http_viewers: AtomicU64,
+    progress_offset: AtomicU64,
     publishers: Mutex<std::collections::BTreeSet<(&'static str, String)>>,
     storage_failures: AtomicU64,
     storage_nanos: AtomicU64,
@@ -207,6 +236,8 @@ impl Operations {
             in_flight: AtomicU64::new(0),
             connections: AtomicU64::new(0),
             process_failures: AtomicU64::new(0),
+            http_viewers: AtomicU64::new(0),
+            progress_offset: AtomicU64::new(0),
             publishers: Mutex::default(),
             storage_failures: AtomicU64::new(0),
             storage_nanos: AtomicU64::new(0),
@@ -232,17 +263,29 @@ impl Operations {
 
     pub fn emit(&self, category: &'static str, action: &'static str, name: &str, domain: &str) {
         let event = Event {
-            ts: time::OffsetDateTime::now_utc()
-                .unix_timestamp_nanos()
-                .div_euclid(1_000_000) as i64,
+            ts: unix_ms(),
             category,
             action,
             name: crate::engine::sanitize(name),
             domain: crate::engine::sanitize(domain),
             message: None,
             level: "info",
+            progress: None,
         };
         self.publish(event);
+    }
+
+    fn process_progress(&self, name: &str, domain: &str, progress: crate::engine::Progress) {
+        let _ = self.bus.send(Event {
+            ts: unix_ms(),
+            category: "process",
+            action: "progress",
+            name: crate::engine::sanitize(name),
+            domain: crate::engine::sanitize(domain),
+            message: None,
+            level: "info",
+            progress: Some(Box::new(progress)),
+        });
     }
 
     pub fn publish(&self, event: Event) {
@@ -423,13 +466,28 @@ impl Operations {
         let mut cpu = 0.0;
         let mut memory = 0u64;
         let mut restarts = 0u64;
-        for job in engine.list().await {
-            let state = job.snapshot();
-            restarts = restarts.saturating_add(u64::from(state.restart_count));
-            if state.pid.is_some() {
+        let mut process_states = [0; PROCESS_STATES.len()];
+        let mut jobs = engine.list().await;
+        let subscribers = self.bus.receiver_count() != 0;
+        if subscribers && !jobs.is_empty() {
+            let offset =
+                self.progress_offset.fetch_add(64, Ordering::Relaxed) as usize % jobs.len();
+            jobs.rotate_left(offset);
+        }
+        for (index, job) in jobs.iter().enumerate() {
+            let (execution, pid, restart_count, usage, progress) = job.telemetry();
+            if let Some(position) = PROCESS_STATES.iter().position(|state| *state == execution) {
+                process_states[position] += 1;
+            }
+            restarts = restarts.saturating_add(u64::from(restart_count));
+            if pid.is_some() {
                 running += 1.0;
-                cpu += state.usage.cpu;
-                memory = memory.saturating_add(state.usage.memory);
+                cpu += usage.cpu;
+                memory = memory.saturating_add(usage.memory);
+                if progress.started && index < 64 && subscribers {
+                    let job = job.job();
+                    self.process_progress(&job.config.id, &job.config.domain, progress);
+                }
             }
         }
         add("process_running", Some(running));
@@ -457,6 +515,19 @@ impl Operations {
             );
         }
         let (viewers, bytes) = media.sessions.metrics();
+        let previous = self.http_viewers.swap(viewers as u64, Ordering::Relaxed);
+        if previous != viewers as u64 {
+            self.emit(
+                "session",
+                if previous < viewers as u64 {
+                    "viewers_increased"
+                } else {
+                    "viewers_decreased"
+                },
+                "",
+                "http",
+            );
+        }
         add("media_http_viewers", Some(viewers as f64));
         add("media_http_bytes_total", Some(bytes as f64));
         if let Some(transport) = &media.transport {
@@ -504,7 +575,11 @@ impl Operations {
             {
                 history.pop_front();
             }
-            history.push_back(Metrics { ts, values });
+            history.push_back(Metrics {
+                ts,
+                values,
+                process_states,
+            });
         }
     }
 
@@ -546,8 +621,32 @@ impl Operations {
             "# TYPE castvane_http_request_duration_seconds summary\ncastvane_http_request_duration_seconds_sum {}\ncastvane_http_request_duration_seconds_count {requests}",
             self.request_nanos.load(Ordering::Relaxed) as f64 / 1e9
         );
+        let host = self.host();
+        for (name, read) in GPU_METRICS {
+            let mut samples = host
+                .gpus
+                .iter()
+                .take(16)
+                .enumerate()
+                .filter_map(|(index, gpu)| {
+                    read(gpu)
+                        .filter(|value| value.is_finite())
+                        .map(|value| (index, value))
+                })
+                .peekable();
+            if samples.peek().is_some() {
+                let _ = writeln!(out, "# TYPE castvane_{name} gauge");
+                for (index, value) in samples {
+                    let _ = writeln!(out, "castvane_{name}{{index=\"{index}\"}} {value}");
+                }
+            }
+        }
         self.measure(|measurements| {
             if let Some(latest) = measurements.back() {
+                out.push_str("# TYPE castvane_restream_state gauge\n");
+                for (state, count) in PROCESS_STATES.iter().zip(latest.process_states) {
+                    let _ = writeln!(out, "castvane_restream_state{{state=\"{}\"}} {count}", state.wire());
+                }
                 for (name, desc) in METRICS {
                     if let Some(value) = latest.values.get(name) {
                         let kind = if matches!(*name, "process_failed_total" | "media_http_bytes_total" | "storage_http_failures_total" | "storage_http_duration_seconds_sum") { "counter" } else { "gauge" };
@@ -563,5 +662,42 @@ impl Operations {
 impl Drop for Operations {
     fn drop(&mut self) {
         self.stop.cancel();
+    }
+}
+
+fn unix_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpu_metrics_only_have_fixed_indices_and_report_available_data() {
+        let gpu = resources::Gpu {
+            vendor: "nvidia",
+            model: "fixture model".into(),
+            identifier: "private GPU UUID".into(),
+            device: None,
+            utilization: Some(13.0),
+            encoder: None,
+            decoder: Some(17.0),
+            memory_bytes: Some(4096),
+            memory_used_bytes: Some(2048),
+        };
+        let ops = Operations::new(
+            &serde_json::Value::Null,
+            resources::Snapshot {
+                gpus: vec![gpu; 17],
+                ..resources::Snapshot::default()
+            },
+        );
+        let text = ops.prometheus();
+        assert!(text.contains("castvane_gpu_decoder{index=\"15\"} 17"));
+        assert!(text.contains("castvane_gpu_mem_free{index=\"0\"} 2048"));
+        assert!(!text.contains("index=\"16\""));
+        assert!(!text.contains("gpu_encoder"));
+        assert!(!text.contains("private GPU UUID"));
     }
 }

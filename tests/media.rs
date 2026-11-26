@@ -644,6 +644,7 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             };
             (uri("publish"), uri("read"), "mpegts")
         };
+        let publisher_started = std::time::Instant::now();
         let mut encoder = tokio::process::Command::new("ffmpeg");
         let mut child = encoder
             .kill_on_drop(true)
@@ -677,6 +678,10 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             .spawn()
             .unwrap();
         wait_channel(&fixture, protocol, true).await;
+        println!(
+            "{wire} publisher launch to channel inventory: {:.2} s",
+            publisher_started.elapsed().as_secs_f64()
+        );
         if wire == "rtmp" {
             fixture
                 .expect(403, "GET", "/rtmp/live/color", Body::empty())

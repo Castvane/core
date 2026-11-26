@@ -55,6 +55,7 @@ impl<S: Subscriber> Layer<S> for Capture {
             domain: String::new(),
             message: Some(message),
             level,
+            progress: None,
         });
     }
 }

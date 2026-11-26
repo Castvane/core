@@ -374,6 +374,7 @@ async fn real_ffmpeg_ffprobe_and_restart_reconciliation() {
             .any(|proto| proto["id"] == "file")
     );
     assert!(skills["ffprobe_available"].as_bool().unwrap());
+    assert!(!skills["ffprobe_version"].as_str().unwrap().is_empty());
     server
         .expect(200, "GET", "/api/v3/skills/reload", None)
         .await;
@@ -878,4 +879,72 @@ async fn ffprobe_timeout_reaps_its_child_and_returns_an_api_error() {
         .unwrap();
     assert!(!running(pid));
     server.state.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable delegated cgroup v2 with cpu and memory controllers"]
+async fn kernel_limits_attach_and_remove_an_ffmpeg_cgroup() {
+    let root = std::path::PathBuf::from(std::env::var_os("CASTVANE_TEST_CGROUP_ROOT").unwrap());
+    let dir = TempDir::new().unwrap();
+    let ffmpeg = dir.path().join("ffmpeg");
+    mock(&ffmpeg, "echo frame=1\necho progress=continue\nsleep 600");
+    let server = Server::open(
+        &dir,
+        &[
+            ("CORE_PROCESS_CGROUP_ROOT", root.to_str().unwrap()),
+            ("CORE_FFMPEG_BINARY", ffmpeg.to_str().unwrap()),
+        ],
+    )
+    .await;
+    let mut config = synthetic("hard-limits");
+    config["limits"] = json!({"cpu_usage":25.0,"memory_mbytes":32});
+    config["autostart"] = json!(true);
+    server
+        .expect(200, "POST", "/api/v3/process", Some(config))
+        .await;
+    let path = "/api/v3/process/hard-limits/state";
+    let state = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let state = server.expect(200, "GET", path, None).await;
+            if state["limit_mode"] == "hard" {
+                break state;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("FFmpeg did not enter a delegated cgroup");
+    let pid = state["pid"].as_u64().unwrap();
+    let mut entries = tokio::fs::read_dir(&root).await.unwrap();
+    let path = loop {
+        let entry = entries
+            .next_entry()
+            .await
+            .unwrap()
+            .expect("child cgroup missing");
+        let path = entry.path();
+        if entry.file_type().await.unwrap().is_dir()
+            && tokio::fs::read_to_string(path.join("cgroup.procs"))
+                .await
+                .unwrap_or_default()
+                .lines()
+                .any(|value| value.parse() == Ok(pid))
+        {
+            break path;
+        }
+    };
+    assert_eq!(
+        std::fs::read_to_string(path.join("cpu.max"))
+            .unwrap()
+            .trim(),
+        "25000 100000"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path.join("memory.max"))
+            .unwrap()
+            .trim(),
+        "33554432"
+    );
+    server.state.close().await;
+    assert!(!path.exists(), "child cgroup survived shutdown");
 }

@@ -56,7 +56,7 @@ Provide standalone and clustered modes, with stable node identity, enrollment/au
 
 ### 6 — Release and maintenance
 
-Finish endpoint/feature coverage, GraphQL operations and legacy UI tests. Add documented migrations and safe rollback for applicable existing configurations, native binaries and Docker images for supported architectures, health/readiness, observability, dependency/license audit, release SBOM, soak/load tests and disaster recovery drills. Document unsupported legacy behaviors, if any. Require all compatibility and operational gates to pass before declaring a production release.
+Finish endpoint/feature coverage, GraphQL operations and legacy UI tests. Add documented migrations and safe rollback for applicable existing configurations, native binaries and Docker images for supported architectures, health/readiness, observability, dependency/license audit, release SBOM, soak/load tests and disaster recovery drills. The [candidate build and recovery workflow](docs/DEPLOYMENT.md) can generate unsigned native and container artifacts. Production publication, Go migration, GraphQL and the release acceptance gates remain open.
 
 ## Quality gates
 

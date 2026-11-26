@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, convert::Infallible, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
@@ -16,7 +17,7 @@ use super::{ApiError, check_network, identify, peer, read_settings};
 use crate::{
     App,
     auth::TokenUse,
-    ops::{Event, METRICS},
+    ops::{Event, METRICS, PROCESS_STATES},
 };
 
 type Reply = Result<Json<Value>, ApiError>;
@@ -165,12 +166,20 @@ async fn scrape(State(app): State<Arc<App>>, request: Request) -> Result<Respons
 
 async fn describe(State(app): State<Arc<App>>) -> Reply {
     enabled(&app, "enable").await?;
-    let mut descriptions: Vec<_> = METRICS.iter().collect();
-    descriptions.sort_by_key(|(name, _)| *name);
+    let mut descriptions: Vec<_> = METRICS
+        .iter()
+        .map(|&(name, doc)| (name, doc, &[][..]))
+        .collect();
+    descriptions.push((
+        "restream_state",
+        "Summarized current process states",
+        &["state"],
+    ));
+    descriptions.sort_by_key(|(name, _, _)| *name);
     Ok(Json(json!(
         descriptions
             .into_iter()
-            .map(|(name, doc)| json!({"name":name,"description":doc,"labels":[]}))
+            .map(|(name, doc, labels)| json!({"name":name,"description":doc,"labels":labels}))
             .collect::<Vec<_>>()
     )))
 }
@@ -206,19 +215,46 @@ async fn metrics(State(app): State<Arc<App>>, query: Result<Json<Query>, JsonRej
     let matchers = query
         .metrics
         .into_iter()
-        .filter(|metric| metric.labels.is_empty())
         .map(|metric| {
-            glob::Pattern::new(&metric.name)
-                .map_err(|_| ApiError::bad_request("invalid metric pattern"))
+            let parse = |value: &str| {
+                glob::Pattern::new(value)
+                    .map_err(|_| ApiError::bad_request("invalid metric pattern"))
+            };
+            let name = parse(&metric.name)?;
+            let labels = metric
+                .labels
+                .into_iter()
+                .map(|(key, value)| {
+                    if key.len() > 64 || value.len() > 256 {
+                        return Err(ApiError::bad_request("metrics query exceeds limits"));
+                    }
+                    Ok((key, parse(&value)?))
+                })
+                .collect::<Result<BTreeMap<_, _>, ApiError>>()?;
+            Ok((name, labels))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    let matches = |name: &str, state: Option<&str>| {
+        matchers.iter().any(|(metric, labels)| {
+            metric.matches(name)
+                && labels.iter().all(|(key, value)| {
+                    key == "state" && state.is_some_and(|state| value.matches(state))
+                })
+        })
+    };
     let values = app
         .ops
         .measure(|measurements| {
             let last = measurements.back().map_or(0, |sample| sample.ts);
             let mut result = Vec::new();
-            for (name, _) in METRICS {
-                if !matchers.iter().any(|matcher| matcher.matches(name)) {
+            let series = METRICS.iter().map(|&(name, _)| (name, None)).chain(
+                PROCESS_STATES
+                    .iter()
+                    .enumerate()
+                    .map(|(index, state)| ("restream_state", Some((index, state.wire())))),
+            );
+            for (name, state) in series {
+                if !matches(name, state.map(|(_, state)| state)) {
                     continue;
                 }
                 let mut points = Vec::new();
@@ -230,14 +266,19 @@ async fn metrics(State(app): State<Arc<App>>, query: Result<Json<Query>, JsonRej
                     if sample.ts > earliest {
                         continue;
                     }
-                    if let Some(val) = sample.values.get(name) {
+                    let value = match state {
+                        Some((index, _)) => Some(f64::from(sample.process_states[index])),
+                        None => sample.values.get(name).copied(),
+                    };
+                    if let Some(value) = value {
                         let ts = time::OffsetDateTime::from_unix_timestamp(sample.ts)
                             .ok()
-                            .and_then(|v| {
-                                v.format(&time::format_description::well_known::Rfc3339)
+                            .and_then(|timestamp| {
+                                timestamp
+                                    .format(&time::format_description::well_known::Rfc3339)
                                     .ok()
                             });
-                        points.push(json!({"ts":ts,"value":val}));
+                        points.push(json!({"ts":ts,"value":value}));
                         earliest = sample
                             .ts
                             .saturating_sub(interval.min(i64::MAX as u64) as i64);
@@ -245,7 +286,9 @@ async fn metrics(State(app): State<Arc<App>>, query: Result<Json<Query>, JsonRej
                 }
                 if !points.is_empty() {
                     points.reverse();
-                    result.push(json!({"name":name,"labels":{},"values":points}));
+                    let labels =
+                        state.map_or_else(|| json!({}), |(_, state)| json!({"state":state}));
+                    result.push(json!({"name":name,"labels":labels,"values":points}));
                 }
             }
             result
@@ -265,7 +308,11 @@ async fn log(State(app): State<Arc<App>>, request: Request) -> Reply {
             .is_none_or(|comp| comp == event.category)
     });
     let result: Vec<_> = if raw {
-        records.map(|event| log_entry(&event)).collect()
+        records.map(|event| {
+            let timestamp = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(event.ts) * 1_000_000)
+                .ok().and_then(|timestamp| timestamp.format(&time::format_description::well_known::Rfc3339).ok());
+            json!({"ts":timestamp,"component":event.category,"level":event.level,"message":event_text(&event)})
+        }).collect()
     } else {
         records
             .map(|event| {
@@ -274,7 +321,7 @@ async fn log(State(app): State<Arc<App>>, request: Request) -> Reply {
                     event.ts,
                     event.level,
                     event.category,
-                    event.message.as_deref().unwrap_or(event.action)
+                    event_text(&event)
                 ))
             })
             .collect()
@@ -282,9 +329,23 @@ async fn log(State(app): State<Arc<App>>, request: Request) -> Reply {
     Ok(Json(json!(result)))
 }
 
+fn event_text(event: &Event) -> &str {
+    event.message.as_deref().unwrap_or(event.action)
+}
+
 fn log_entry(event: &Event) -> Value {
-    json!({"ts":event.ts,"event":event.category,"component":event.category,
-        "level":event.level,"message":event.message.as_deref().unwrap_or(event.action),"caller":"","data":{}})
+    json!({"ts":event.ts / 1000,"event":event.category,
+        "level":event.level,"message":event_text(event),"caller":"","data":{}})
+}
+
+fn process_entry(event: &Event) -> Value {
+    let mut value =
+        json!({"pid":event.name,"domain":event.domain,"type":event.action,"ts":event.ts});
+    if let Some(progress) = &event.progress {
+        value["progress"] =
+            json!({"input":null,"output":null,"time":progress.seconds,"speed":progress.speed});
+    }
+    value
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -332,33 +393,76 @@ struct Filter {
     event: String,
     message: String,
     level: String,
+    caller: String,
+    core_id: String,
+    data: BTreeMap<String, String>,
     pid: String,
     domain: String,
     #[serde(rename = "type")]
     kind: String,
 }
 
-struct Compiled {
-    fields: [Option<glob::Pattern>; 6],
+enum Filters {
+    Log(BTreeMap<String, LogFilter>),
+    Process(Vec<[Option<Regex>; 4]>),
+    Media,
 }
 
-impl Compiled {
+struct LogFilter {
+    message: Option<Regex>,
+    level: Option<Regex>,
+    requires_data: bool,
+}
+
+impl Filters {
     fn matches(&self, event: &Event) -> bool {
-        [
-            event.category,
-            event.message.as_deref().unwrap_or(event.action),
-            &event.name,
-            &event.domain,
-            event.action,
-            event.level,
-        ]
-        .iter()
-        .zip(&self.fields)
-        .all(|(value, pattern)| pattern.as_ref().is_none_or(|pat| pat.matches(value)))
+        match self {
+            Self::Log(filters) => {
+                event.progress.is_none()
+                    && (filters.is_empty()
+                        || filters.get(event.category).is_some_and(|filter| {
+                            !filter.requires_data
+                                && filter
+                                    .message
+                                    .as_ref()
+                                    .is_none_or(|re| re.is_match(event_text(event)))
+                                && filter
+                                    .level
+                                    .as_ref()
+                                    .is_none_or(|re| re.is_match(event.level))
+                        }))
+            }
+            Self::Process(filters) => {
+                event.category == "process"
+                    && (filters.is_empty()
+                        || filters.iter().any(|filter| {
+                            [&event.name, &event.domain, event.action, ""]
+                                .into_iter()
+                                .zip(filter)
+                                .all(|(value, re)| re.as_ref().is_none_or(|re| re.is_match(value)))
+                        }))
+            }
+            Self::Media => event.category == "media",
+        }
     }
 }
 
-async fn get_filters(body: Body) -> Result<Vec<Compiled>, ApiError> {
+fn event_regex(value: &str) -> Result<Option<Regex>, ApiError> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > 512 {
+        return Err(ApiError::bad_request("invalid event filter"));
+    }
+    RegexBuilder::new(value)
+        .case_insensitive(true)
+        .size_limit(64 * 1024)
+        .build()
+        .map(Some)
+        .map_err(|_| ApiError::bad_request("invalid event filter"))
+}
+
+async fn get_filters(body: Body) -> Result<Vec<Filter>, ApiError> {
     let body = to_bytes(body, 64 * 1024)
         .await
         .map_err(|_| ApiError::bad_request("invalid event filters"))?;
@@ -370,32 +474,7 @@ async fn get_filters(body: Body) -> Result<Vec<Compiled>, ApiError> {
     if filters.filters.len() > 32 {
         return Err(ApiError::bad_request("too many filters"));
     }
-    filters
-        .filters
-        .into_iter()
-        .map(|filter| {
-            let mut fields = [const { None }; 6];
-            for (dest, value) in fields.iter_mut().zip([
-                filter.event,
-                filter.message,
-                filter.pid,
-                filter.domain,
-                filter.kind,
-                filter.level,
-            ]) {
-                if !value.is_empty() {
-                    if value.len() > 512 {
-                        return Err(ApiError::bad_request("invalid event filter"));
-                    }
-                    *dest = Some(
-                        glob::Pattern::new(&value)
-                            .map_err(|_| ApiError::bad_request("invalid event filter"))?,
-                    );
-                }
-            }
-            Ok(Compiled { fields })
-        })
-        .collect()
+    Ok(filters.filters)
 }
 
 struct Audience {
@@ -439,8 +518,34 @@ async fn log_events(State(app): State<Arc<App>>, request: Request) -> Result<Res
         .and_then(|v| v.to_str().ok())
         .is_some_and(|accept| accept.contains("application/x-json-stream"));
     let audience = Audience::from_request(app, &request);
-    let filters = get_filters(request.into_body()).await?;
-    events(audience, StreamKind::Log, None, None, filters, sse)
+    let mut filters = BTreeMap::new();
+    for filter in get_filters(request.into_body()).await? {
+        if filter.event.len() > 128 || filter.data.len() > 16 {
+            return Err(ApiError::bad_request("invalid event filter"));
+        }
+        // Local records have no caller, cluster ID or arbitrary tracing fields.
+        event_regex(&filter.caller)?;
+        event_regex(&filter.core_id)?;
+        for pattern in filter.data.values() {
+            event_regex(pattern)?;
+        }
+        filters.insert(
+            filter.event.to_ascii_lowercase(),
+            LogFilter {
+                message: event_regex(&filter.message)?,
+                level: event_regex(&filter.level)?,
+                requires_data: !filter.data.is_empty(),
+            },
+        );
+    }
+    events(
+        audience,
+        StreamKind::Log,
+        None,
+        None,
+        Filters::Log(filters),
+        sse,
+    )
 }
 
 async fn process_events(
@@ -448,8 +553,26 @@ async fn process_events(
     request: Request,
 ) -> Result<Response, ApiError> {
     let audience = Audience::from_request(app, &request);
-    let filters = get_filters(request.into_body()).await?;
-    events(audience, StreamKind::Process, None, None, filters, false)
+    let filters = get_filters(request.into_body())
+        .await?
+        .into_iter()
+        .map(|filter| {
+            Ok([
+                event_regex(&filter.pid)?,
+                event_regex(&filter.domain)?,
+                event_regex(&filter.kind)?,
+                event_regex(&filter.core_id)?,
+            ])
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    events(
+        audience,
+        StreamKind::Process,
+        None,
+        None,
+        Filters::Process(filters),
+        false,
+    )
 }
 
 async fn media_events(
@@ -492,7 +615,7 @@ async fn media_events(
         StreamKind::Media,
         Some((kind, pattern)),
         Some(names),
-        Vec::new(),
+        Filters::Media,
         false,
     )
 }
@@ -502,7 +625,7 @@ fn events(
     kind: StreamKind,
     media: Option<(String, glob::Pattern)>,
     names: Option<Vec<String>>,
-    filters: Vec<Compiled>,
+    filters: Filters,
     sse: bool,
 ) -> Result<Response, ApiError> {
     let app = &audience.app;
@@ -530,7 +653,12 @@ fn events(
                     if !tokio::time::timeout(Duration::from_secs(2), audience.authorized()).await.is_ok_and(|result| result.unwrap_or(false)) {
                         break;
                     }
-                    let heartbeat = if sse {":keepalive\n\n"} else if media.is_some() {"{\"action\":\"keepalive\"}\n"} else {"{\"type\":\"keepalive\"}\n"};
+                    let heartbeat = match kind {
+                        StreamKind::Log if sse => ":keepalive\n\n",
+                        StreamKind::Log => "{\"event\":\"keepalive\"}\n",
+                        StreamKind::Media => "{\"action\":\"keepalive\"}\n",
+                        StreamKind::Process => "{\"type\":\"keepalive\"}\n",
+                    };
                     yield Ok(Bytes::from_static(heartbeat.as_bytes()));
                 }
                 item = sub.recv() => {
@@ -539,9 +667,9 @@ fn events(
                         Err(broadcast::error::RecvError::Lagged(_))=>break,
                         Err(broadcast::error::RecvError::Closed)=>break,
                     };
-                    if !filters.is_empty() && !filters.iter().any(|filter| filter.matches(&event)) { continue; }
+                    if !filters.matches(&event) { continue; }
                     let value = match kind {
-                        StreamKind::Process if event.category=="process" => json!({"pid": event.name,"domain":event.domain,"type":event.action,"ts":event.ts}),
+                        StreamKind::Process => process_entry(&event),
                         StreamKind::Media if event.category=="media" && media.as_ref().is_some_and(|(mount, pattern)| &event.domain==mount && pattern.matches(&event.name)) => json!({"action":event.action,"name":event.name,"ts":event.ts}),
                         StreamKind::Log => log_entry(&event),
                         _ => continue,

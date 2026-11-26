@@ -14,6 +14,7 @@ pub struct Inventory {
     pub formats: Formats<Item>,
     pub protocols: Protocols,
     pub ffprobe_available: bool,
+    pub ffprobe_version: Option<String>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -107,10 +108,18 @@ pub async fn inspect(options: &Options) -> Result<Inventory, Error> {
         options.launcher.as_deref(),
     )
     .await;
-    let mut inventory = Inventory {
-        ffprobe_available: probe.is_ok_and(|p| p.success),
-        ..Inventory::default()
-    };
+    let mut inventory = Inventory::default();
+    if let Ok(probe) = probe
+        && probe.success
+    {
+        inventory.ffprobe_available = true;
+        inventory.ffprobe_version = probe
+            .stdout
+            .lines()
+            .chain(probe.stderr.lines())
+            .find_map(|line| line.strip_prefix("ffprobe version ").map(version_number))
+            .filter(|version| !version.is_empty());
+    }
     for line in version.lines() {
         if let Some(value) = line.strip_prefix("ffmpeg version ") {
             inventory.ffmpeg.version = version_number(value);

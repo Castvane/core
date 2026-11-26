@@ -61,6 +61,30 @@ def compare_shape(base, fixture, username, password):
         results["zone deleted"] = call("DELETE", f"{zone}/{fixture}") == "OK"
     results["unknown zone error"] = sorted(call("GET", f"{zone}/{fixture}", expected=404))
     results["log raw array"] = isinstance(call("GET", "/api/v3/log?format=raw"), list)
+    for path, pattern in (
+        ("log", {"event": "core", "message": "["}),
+        ("process", {"type": "["}),
+    ):
+        route = f"/api/v3/events/{path}"
+        results[f"invalid {path} regex"] = sorted(
+            call("POST", route, 400, {"filters": [pattern]})
+        )
+
+    def heartbeat(path, accept):
+        req = urllib.request.Request(
+            base + path, method="POST", data=b"{}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                     "Accept": accept},
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            first = response.readline(4096).decode().strip()
+            return response.headers.get_content_type(), json.loads(first) if first.startswith("{") else first
+
+    results["log SSE heartbeat"] = heartbeat("/api/v3/events/log", "text/event-stream")
+    results["log JSON heartbeat"] = heartbeat("/api/v3/events/log", "application/x-json-stream")
+    results["process JSON heartbeat"] = heartbeat("/api/v3/events/process", "application/x-json-stream")
+    metric = next(row for row in call("GET", "/api/v3/metrics") if row["name"] == "restream_state")
+    results["process state metric descriptor"] = metric["labels"]
     return results
 
 

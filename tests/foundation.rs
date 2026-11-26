@@ -192,7 +192,19 @@ async fn discovery_local_login_refresh_and_policy() {
         .await;
     assert_eq!(status, 200);
     assert_eq!(docs["openapi"], "3.1.0");
-    assert!(docs["paths"].get("/api/v3/process").is_some());
+    assert_eq!(
+        docs["paths"]["/api/v3/process/{id}/command"]["put"]["requestBody"]["content"]["application/json"]
+            ["schema"]["$ref"],
+        "#/components/schemas/ProcessCommand"
+    );
+    assert_eq!(
+        docs["paths"]["/api/v3/events/process"]["post"]["requestBody"]["required"],
+        false
+    );
+    assert_eq!(
+        docs["paths"]["/api/v3/process/{id}"]["get"]["parameters"][0]["in"],
+        "path"
+    );
     assert_eq!(
         server
             .request("GET", "/api/v3/process", None, Some(access))

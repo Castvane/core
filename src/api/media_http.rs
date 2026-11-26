@@ -669,7 +669,7 @@ fn not_modified(headers: &HeaderMap, meta: &Meta) -> bool {
         return etag
             .split(',')
             .map(str::trim)
-            .any(|v| v == "*" || v.trim_start_matches("W/") == meta.tag);
+            .any(|v| v == "*" || v.trim_start_matches("W/") == meta.tag.trim_start_matches("W/"));
     }
     since(headers, header::IF_MODIFIED_SINCE)
         .is_some_and(|date| now_secs(meta.modified) <= now_secs(date))
@@ -680,7 +680,7 @@ fn if_range(headers: &HeaderMap, meta: &Meta) -> bool {
         .get(header::IF_RANGE)
         .and_then(|v| v.to_str().ok())
         .is_none_or(|v| {
-            v == meta.tag
+            (v == meta.tag && !meta.tag.starts_with("W/"))
                 || httpdate::parse_http_date(v)
                     .is_ok_and(|date| now_secs(meta.modified) <= now_secs(date))
         })

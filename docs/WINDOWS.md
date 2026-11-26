@@ -1,6 +1,6 @@
 # Running Castvane natively on Windows
 
-Use 64-bit Windows and a native x64 FFmpeg and FFprobe pair. These executables are supplied by the operator. Windows CI builds with the MSVC Rust toolchain and provides a portable `restreamer-core.exe` archive with a SHA-256 checksum.
+Use 64-bit Windows, the Microsoft Visual C++ x64 Redistributable, and a native x64 FFmpeg and FFprobe pair. These executables are supplied by the operator. Windows CI builds with the MSVC Rust toolchain and provides a portable `restreamer-core.exe` archive with a SHA-256 checksum.
 
 To build from source, install Rust through rustup and Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK. Open a developer PowerShell and run `cargo build --locked --release`. Use `target\release\restreamer-core.exe` or extract the CI archive.
 

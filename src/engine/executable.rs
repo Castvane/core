@@ -78,7 +78,7 @@ pub(crate) fn spawn(command: &mut Command) -> std::io::Result<(Child, Group)> {
 pub(crate) fn spawn(command: &mut Command) -> std::io::Result<(Child, Group)> {
     let mut limits = win32job::ExtendedLimitInfo::new();
     limits.limit_kill_on_job_close();
-    let job = win32job::Job::create_with_limit_info(&mut limits).map_err(std::io::Error::other)?;
+    let job = win32job::Job::create_with_limit_info(&limits).map_err(std::io::Error::other)?;
     let mut child = command.spawn()?;
     let handle = child
         .raw_handle()

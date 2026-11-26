@@ -498,6 +498,11 @@ pub async fn nvidia() -> Vec<Gpu> {
         .unwrap_or_default()
 }
 
+#[cfg(windows)]
+pub async fn nvidia() -> Vec<Gpu> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,9 +560,4 @@ mod tests {
             start.elapsed().as_secs_f64() * 10.0
         );
     }
-}
-
-#[cfg(windows)]
-pub async fn nvidia() -> Vec<Gpu> {
-    Vec::new()
 }

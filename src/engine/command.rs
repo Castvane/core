@@ -341,7 +341,7 @@ impl Options {
             });
         }
         let mut args = vec![
-            "-nostdin".into(),
+            if cfg!(windows) { "-stdin" } else { "-nostdin" }.into(),
             "-hide_banner".into(),
             "-nostats".into(),
             "-progress".into(),

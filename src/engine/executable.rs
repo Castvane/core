@@ -16,8 +16,10 @@ pub fn launch(
     binary: &Path,
     arguments: &[String],
     launcher: Option<&Path>,
+    stdin: Stdio,
 ) -> std::io::Result<(Child, Group)> {
     let mut command = command(binary, launcher);
+    command.stdin(stdin);
     command
         .args(arguments)
         .stdout(Stdio::piped())
@@ -132,7 +134,7 @@ pub async fn capture(
     timeout: Duration,
     launcher: Option<&Path>,
 ) -> Result<Capture, Error> {
-    let (mut child, mut group) = launch(binary, args, launcher)
+    let (mut child, mut group) = launch(binary, args, launcher, Stdio::null())
         .map_err(|_| Error::Unavailable("configured media executable could not start"))?;
     let stdout = child.stdout.take().ok_or(Error::Internal)?;
     let stderr = child.stderr.take().ok_or(Error::Internal)?;

@@ -291,9 +291,16 @@ impl Supervisor {
         {
             return Exit::failed("cluster ownership lease expired");
         }
-        let Ok((mut child, mut group)) =
-            launch(&options.ffmpeg, &command.args, options.launcher.as_deref())
-        else {
+        let Ok((mut child, mut group)) = launch(
+            &options.ffmpeg,
+            &command.args,
+            options.launcher.as_deref(),
+            if cfg!(windows) {
+                std::process::Stdio::piped()
+            } else {
+                std::process::Stdio::null()
+            },
+        ) else {
             let mut runtime = lock(state);
             let timestamp = runtime.active.created.to_string();
             runtime.active.log.push_back([
@@ -511,7 +518,23 @@ async fn terminate(
     interrupted: bool,
 ) -> Exit {
     lock(state).execution = Execution::Finishing;
+    #[cfg(target_os = "linux")]
     group.stop();
+    #[cfg(windows)]
+    {
+        use tokio::io::AsyncWriteExt;
+        let requested = if let Some(stdin) = &mut child.stdin {
+            matches!(
+                tokio::time::timeout(Duration::from_millis(100), stdin.write_all(b"q\n")).await,
+                Ok(Ok(()))
+            )
+        } else {
+            false
+        };
+        if !requested {
+            group.stop();
+        }
+    }
     match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
         Ok(Ok(status)) => Exit {
             state: Execution::Finished,

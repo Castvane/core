@@ -825,8 +825,13 @@ async fn flv(media: &Media, channel: &str) -> Result<Response, ApiError> {
     }
     args.extend(["-i", &url, "-c", "copy", "-f", "flv", "pipe:1"]);
     let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
-    let (mut child, group) =
-        launch(&media.ffmpeg, &args, media.launcher.as_deref()).map_err(|_| Error::Unavailable)?;
+    let (mut child, group) = launch(
+        &media.ffmpeg,
+        &args,
+        media.launcher.as_deref(),
+        std::process::Stdio::null(),
+    )
+    .map_err(|_| Error::Unavailable)?;
     let stderr = child.stderr.take();
     let stderr_task = tokio::spawn(async move {
         if let Some(mut stderr) = stderr {

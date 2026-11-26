@@ -143,6 +143,26 @@ async fn disk_http_range_head_alias_and_interrupted_atomic_publication() {
     assert_eq!(response.status(), 206);
     assert_eq!(response.headers()["content-range"], "bytes 2-5/10");
     assert_eq!(to_bytes(response.into_body(), 32).await.unwrap(), "2345");
+    let multi = fixture
+        .request("GET", get, &[("range", "bytes=0-1,8-9")], Body::empty())
+        .await;
+    assert_eq!(multi.status(), 206);
+    assert!(
+        multi.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("multipart/byteranges")
+    );
+    let expected_length = multi.headers()["content-length"]
+        .to_str()
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    let data = to_bytes(multi.into_body(), 1024).await.unwrap();
+    assert_eq!(data.len(), expected_length);
+    let data = std::str::from_utf8(&data).unwrap();
+    assert!(data.contains("Content-Range: bytes 0-1/10\r\n\r\n01"));
+    assert!(data.contains("Content-Range: bytes 8-9/10\r\n\r\n89"));
     let invalid = fixture
         .request("GET", get, &[("range", "bytes=99-")], Body::empty())
         .await;
@@ -597,13 +617,9 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             (uri.clone(), uri, "flv")
         } else {
             let uri = |mode: &str| {
-                let mut u = url::Url::parse(&format!("srt://{srt}")).unwrap();
-                u.query_pairs_mut()
-                    .append_pair("streamid", &format!("{mode}:color:token=srt-fixture"))
-                    .append_pair("mode", "caller")
-                    .append_pair("passphrase", "srt-password-fixture")
-                    .append_pair("pbkeylen", "16");
-                u.to_string()
+                format!(
+                    "srt://{srt}?streamid={mode}:color:token=srt-fixture&mode=caller&passphrase=srt-password-fixture&pbkeylen=16"
+                )
             };
             (uri("publish"), uri("read"), "mpegts")
         };
@@ -683,6 +699,26 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
         wait_channel(&fixture, protocol, false).await;
         let _ = child.kill().await;
     }
+    for (protocol, address, format) in [
+        ("rtmp", "{rtmp,name=live/reconnected}", "flv"),
+        ("srt", "{srt,name=reconnected}", "mpegts"),
+    ] {
+        let id = format!("{protocol}-job");
+        let cfg = json!({
+            "id":id,"autostart":true,
+            "input":[{"id":"in","address":"testsrc2=size=64x64:rate=10","options":["-re","-f","lavfi"]}],
+            "output":[{"id":"out","address":address,"options":["-c:v","libx264","-threads","1","-preset","ultrafast","-f",format]}]
+        });
+        fixture
+            .json(200, "POST", "/api/v3/process", Some(cfg))
+            .await;
+        wait_channel(&fixture, protocol, true).await;
+        fixture
+            .json(200, "DELETE", &format!("/api/v3/process/{id}"), None)
+            .await;
+        wait_channel(&fixture, protocol, false).await;
+    }
+
     fixture.close().await;
 }
 
@@ -754,6 +790,85 @@ async fn process_placeholder_publishes_to_memory_and_cleanup_preserves_other_pro
     fixture
         .expect(200, "GET", "/memfs/protected.ts", Body::empty())
         .await;
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn restored_memory_process_waits_for_the_new_http_listener() {
+    let dir = TempDir::new().unwrap();
+    let fixture = Fixture::open(&dir, &[("CORE_STORAGE_MEMORY_MAX_SIZE_MBYTES", "4")]).await;
+    let cfg = json!({"id":"resume", "autostart":true,
+        "input":[{"id":"in","address":"testsrc2=size=64x64:rate=10","options":["-f","lavfi"]}],
+        "output":[{"id":"out","address":"{memfs}/resume.ts","options":["-t","0.2","-c:v","mpeg2video","-threads","1","-f","mpegts","-method","PUT"]}]
+    });
+    fixture
+        .json(200, "POST", "/api/v3/process", Some(cfg))
+        .await;
+    fixture.close().await;
+    let fixture = Fixture::open(&dir, &[("CORE_STORAGE_MEMORY_MAX_SIZE_MBYTES", "4")]).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if fixture
+                .request("HEAD", "/memfs/resume.ts", &[], Body::empty())
+                .await
+                .status()
+                == 200
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn dash_manifest_and_segments_share_one_viewer() {
+    let dir = TempDir::new().unwrap();
+    let fixture = Fixture::open(&dir, &[("CORE_SESSIONS_MAX_SESSIONS", "1")]).await;
+    fixture
+        .expect(
+            201,
+            "PUT",
+            "/api/v3/fs/disk/dash/manifest.mpd",
+            Body::from("<MPD/>"),
+        )
+        .await;
+    fixture
+        .expect(
+            201,
+            "PUT",
+            "/api/v3/fs/disk/dash/init.m4s",
+            Body::from("init"),
+        )
+        .await;
+    let (headers, _) = fixture
+        .expect(200, "GET", "/dash/manifest.mpd", Body::empty())
+        .await;
+    let cookie = headers["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    for _ in 0..3 {
+        let response = fixture
+            .request(
+                "GET",
+                "/dash/init.m4s",
+                &[("cookie", cookie)],
+                Body::empty(),
+            )
+            .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(to_bytes(response.into_body(), 100).await.unwrap(), "init");
+    }
+    let sessions = fixture
+        .json(200, "GET", "/api/v3/session/active?collectors=dash", None)
+        .await;
+    assert_eq!(sessions["dash"].as_array().unwrap().len(), 1);
     fixture.close().await;
 }
 
@@ -886,6 +1001,8 @@ async fn https_uses_a_verified_local_certificate_for_media_requests() {
         &dir,
         &[
             ("CORE_TLS_ENABLE", "true"),
+            ("CORE_API_AUTH_PASSWORD", "https-fixture-password"),
+            ("CORE_API_AUTH_DISABLE_LOCALHOST", "true"),
             ("CORE_TLS_ADDRESS", "127.0.0.1:0"),
             ("CORE_TLS_CERT_FILE", &cert),
             ("CORE_TLS_KEY_FILE", &key),
@@ -918,6 +1035,21 @@ async fn https_uses_a_verified_local_certificate_for_media_requests() {
     let response = client.get(&url).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.bytes().await.unwrap(), "tls media");
+    let signed_in = client
+        .post(format!("https://{addr}/api/login"))
+        .header("Content-Type", "application/json")
+        .body(json!({"username":"admin","password":"https-fixture-password"}).to_string())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let tokens: Value = signed_in.json().await.unwrap();
+    assert!(
+        tokens["access_token"]
+            .as_str()
+            .is_some_and(|token| !token.is_empty())
+    );
     stop.cancel();
     handle.await.unwrap();
     fixture.close().await;

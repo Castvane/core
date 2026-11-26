@@ -172,7 +172,7 @@ impl App {
         let processes = Engine::open(
             store.0.clone(),
             Options::from_document(&effective, &environment.engine)?
-                .with_media(media.endpoints(listening)),
+                .with_media(media.endpoints(listening, false)),
         )
         .await?;
         Ok(Self {
@@ -196,7 +196,8 @@ impl App {
         let listener = TcpListener::bind(*self.listening.get_mut()).await?;
         let local = listener.local_addr()?;
         *self.local_address.get_mut() = local;
-        self.processes.update_media(self.media.endpoints(local));
+        self.processes
+            .update_media(self.media.endpoints(local, true));
         let (sender, receiver) = mpsc::channel(1);
         self.replacement = Some(sender);
         Ok(ReloadableListener::new(listener, receiver))

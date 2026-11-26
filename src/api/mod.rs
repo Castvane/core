@@ -348,10 +348,15 @@ async fn discovery(
 
 async fn login(
     State(app): State<Arc<App>>,
-    connection: Extension<ConnectInfo<SocketAddr>>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    tls: Option<Extension<ConnectInfo<crate::TlsPeer>>>,
     body: Result<Json<dto::Login>, JsonRejection>,
 ) -> Result<Json<dto::Tokens>, ApiError> {
-    if !app.auth.allow_attempt(connection.0.0.ip().to_canonical()) {
+    let peer = connection
+        .map(|Extension(ConnectInfo(peer))| peer)
+        .or_else(|| tls.map(|Extension(ConnectInfo(crate::TlsPeer(peer)))| peer))
+        .ok_or_else(|| ApiError::forbidden("access denied"))?;
+    if !app.auth.allow_attempt(peer.ip().to_canonical()) {
         return Err(ApiError::Throttled);
     }
     let Json(credentials) = body.map_err(|_| ApiError::forbidden("access denied"))?;
@@ -520,7 +525,7 @@ async fn reload_config(State(app): State<Arc<App>>) -> Result<Json<&'static str>
         .await
         .map_err(|detail| ApiError::validation("address", detail))?;
     app.processes
-        .options(engine.with_media(app.media.endpoints(app.media_address().await)));
+        .options(engine.with_media(app.media.endpoints(app.media_address().await, true)));
     (app.on_reload)(&settings.log.level);
     *app.loaded_at.write().await = timestamp()?;
     Ok(Json("OK"))

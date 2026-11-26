@@ -121,6 +121,10 @@ impl Options {
         })
     }
 
+    pub(super) fn local_media_ready(&self) -> bool {
+        self.media.http_ready || self.media.memory.is_none()
+    }
+
     pub fn with_media(mut self, media: crate::media::Endpoints) -> Self {
         self.media = media;
         self
@@ -635,9 +639,6 @@ impl Expansion<'_> {
                         .or_else(|| rest.strip_prefix('/'))
                         .filter(|path| !path.is_empty())
                         .unwrap_or(io.id.as_str());
-                    if key.contains([':', ',', '?', '#', '&', '=', '%']) {
-                        return Err(Error::Invalid("invalid SRT stream ID"));
-                    }
                     let url = url
                         .as_deref()
                         .ok_or(Error::Invalid("SRT listener unavailable"))?;
@@ -646,6 +647,14 @@ impl Expansion<'_> {
                     } else {
                         format!("{}/{key}", self.config.domain)
                     };
+                    if !key.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric()
+                            || matches!(byte, b'-' | b'_' | b'.' | b'/' | b'~')
+                    }) {
+                        return Err(Error::Invalid("invalid SRT stream ID"));
+                    }
+                    crate::media::storage::Key::parse(&key)
+                        .map_err(|_| Error::Invalid("invalid SRT stream ID"))?;
                     result.push_str(&url.replace("COREMEDIAKEY", &key));
                     if rest.starts_with('/') {
                         rest = "";

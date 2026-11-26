@@ -91,6 +91,20 @@ impl Supervisor {
         } else {
             Duration::ZERO
         };
+        let local_storage = job
+            .config
+            .inputs
+            .iter()
+            .chain(&job.config.outputs)
+            .any(|endpoint| {
+                endpoint.address.contains("{memfs}")
+                    || endpoint
+                        .address
+                        .match_indices("{fs:")
+                        .any(|(index, prefix)| {
+                            !endpoint.address[index + prefix.len()..].starts_with("disk}")
+                        })
+            });
         let mut retries = 0u32;
         loop {
             if !delay.is_zero() {
@@ -101,7 +115,17 @@ impl Supervisor {
                     _ = tokio::time::sleep(delay) => {}
                 }
             }
-            let options = self.options.borrow().clone();
+            let options = loop {
+                let current = self.options.borrow_and_update().clone();
+                if !local_storage || current.local_media_ready() {
+                    break current;
+                }
+                tokio::select! {
+                    biased;
+                    _ = wake(updates, &mut self.shutdown) => return,
+                    changed = self.options.changed() => if changed.is_err() { return; },
+                }
+            };
             {
                 let mut runtime = lock(state);
                 runtime.reconnect = None;

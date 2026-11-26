@@ -240,7 +240,7 @@ impl Sessions {
         };
         let mut result = json!({});
         for protocol in selection {
-            if !["hls", "http", "rtmp", "srt", "flv"].contains(&protocol) {
+            if !["hls", "http", "rtmp", "srt", "flv", "dash"].contains(&protocol) {
                 continue;
             }
             let mut total_rate = 0.0;

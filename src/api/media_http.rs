@@ -376,16 +376,9 @@ pub async fn serve(
     let wanted = headers
         .get(header::RANGE)
         .filter(|_| if_range(headers, &meta));
-    let (range, status) = match wanted {
-        Some(range) if !playlist => match parse_range(range, meta.size) {
-            Ok(range) => {
-                add(
-                    &mut response_headers,
-                    header::CONTENT_RANGE,
-                    &format!("bytes {}-{}/{}", range.start, range.end - 1, meta.size),
-                );
-                (range, StatusCode::PARTIAL_CONTENT)
-            }
+    let (ranges, status) = match wanted {
+        Some(range) if !playlist => match parse_ranges(range, meta.size) {
+            Ok(ranges) => (ranges, StatusCode::PARTIAL_CONTENT),
             Err(status) => {
                 if status == StatusCode::RANGE_NOT_SATISFIABLE {
                     add(
@@ -402,14 +395,36 @@ pub async fn serve(
                 return Ok(response);
             }
         },
-        _ => (0..meta.size, StatusCode::OK),
+        _ => (std::iter::once(0..meta.size).collect(), StatusCode::OK),
+    };
+    let range = ranges.first().cloned().ok_or(Error::Invalid)?;
+    let multipart = if ranges.len() > 1 {
+        let boundary = uuid::Uuid::new_v4().simple().to_string();
+        add(
+            &mut response_headers,
+            header::CONTENT_TYPE,
+            &format!("multipart/byteranges; boundary={boundary}"),
+        );
+        Some(MultipartRanges::new(boundary, mime, meta.size, ranges))
+    } else {
+        if status == StatusCode::PARTIAL_CONTENT {
+            add(
+                &mut response_headers,
+                header::CONTENT_RANGE,
+                &content_range(&range, meta.size),
+            );
+        }
+        None
     };
     if *method == Method::HEAD {
         if !playlist {
             add(
                 &mut response_headers,
                 header::CONTENT_LENGTH,
-                &(range.end - range.start).to_string(),
+                &multipart
+                    .as_ref()
+                    .map_or(range.end - range.start, |ranges| ranges.len)
+                    .to_string(),
             );
         }
         return Ok((status, response_headers, Body::empty()).into_response());
@@ -481,6 +496,9 @@ pub async fn serve(
             Box::pin(futures_util::stream::once(async move { Ok(bytes) })) as Stream,
             len,
         )
+    } else if let Some(ranges) = multipart {
+        let len = ranges.len;
+        (ranges.stream(mount.backend.clone(), meta.clone()), len)
     } else {
         let len = range.end - range.start;
         (
@@ -631,7 +649,56 @@ fn since(headers: &HeaderMap, name: axum::http::HeaderName) -> Option<SystemTime
     httpdate::parse_http_date(headers.get(name)?.to_str().ok()?).ok()
 }
 
-fn parse_range(value: &HeaderValue, size: u64) -> Result<Range<u64>, StatusCode> {
+fn content_range(range: &Range<u64>, size: u64) -> String {
+    format!(
+        "bytes {}-{}/{}",
+        range.start,
+        range.end.saturating_sub(1),
+        size
+    )
+}
+
+struct MultipartRanges {
+    parts: Vec<(Bytes, Range<u64>)>,
+    end: Bytes,
+    len: u64,
+}
+
+impl MultipartRanges {
+    fn new(boundary: String, mime: &str, size: u64, ranges: Vec<Range<u64>>) -> Self {
+        let end = Bytes::from(format!("--{boundary}--\r\n"));
+        let parts: Vec<_> = ranges
+            .into_iter()
+            .map(|range| {
+                let header = Bytes::from(format!(
+                    "--{boundary}\r\nContent-Type: {mime}\r\nContent-Range: {}\r\n\r\n",
+                    content_range(&range, size)
+                ));
+                (header, range)
+            })
+            .collect();
+        let len = end.len() as u64
+            + parts
+                .iter()
+                .map(|(header, range)| header.len() as u64 + range.end - range.start + 2)
+                .sum::<u64>();
+        Self { parts, end, len }
+    }
+
+    fn stream(self, backend: std::sync::Arc<dyn Storage>, meta: Meta) -> Stream {
+        Box::pin(async_stream::try_stream! {
+            for (header, range) in self.parts {
+                let mut source = backend.read(&meta, range).await?;
+                yield header;
+                while let Some(chunk) = source.next().await { yield chunk?; }
+                yield Bytes::from_static(b"\r\n");
+            }
+            yield self.end;
+        })
+    }
+}
+
+fn parse_ranges(value: &HeaderValue, size: u64) -> Result<Vec<Range<u64>>, StatusCode> {
     let invalid = StatusCode::BAD_REQUEST;
     let unsat = StatusCode::RANGE_NOT_SATISFIABLE;
     let value = value
@@ -639,9 +706,29 @@ fn parse_range(value: &HeaderValue, size: u64) -> Result<Range<u64>, StatusCode>
         .map_err(|_| invalid)?
         .strip_prefix("bytes=")
         .ok_or(invalid)?;
-    if value.contains(',') {
-        return Err(StatusCode::NOT_IMPLEMENTED);
+    let mut ranges = Vec::new();
+    for (index, item) in value.split(',').enumerate() {
+        if index >= 8 {
+            return Err(unsat);
+        }
+        match parse_range(item.trim(), size) {
+            Ok(range) => ranges.push(range),
+            Err(status) if status == unsat => {}
+            Err(status) => return Err(status),
+        }
     }
+    let total = ranges.iter().fold(0u64, |total, range| {
+        total.saturating_add(range.end - range.start)
+    });
+    if ranges.is_empty() || total > size {
+        return Err(unsat);
+    }
+    Ok(ranges)
+}
+
+fn parse_range(value: &str, size: u64) -> Result<Range<u64>, StatusCode> {
+    let invalid = StatusCode::BAD_REQUEST;
+    let unsat = StatusCode::RANGE_NOT_SATISFIABLE;
     let (start, end) = value.split_once('-').ok_or(invalid)?;
     if size == 0 {
         return Err(unsat);

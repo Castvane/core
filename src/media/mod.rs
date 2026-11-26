@@ -65,6 +65,7 @@ pub struct Cache {
 
 #[derive(Clone, Default)]
 pub struct Endpoints {
+    pub http_ready: bool,
     pub memory: Option<String>,
     pub memory_auth: Option<(String, String)>,
     pub rtmp: Option<String>,
@@ -235,7 +236,7 @@ impl Media {
         transport::eq(&self.memory_user, user) && transport::eq(&self.memory_password, password)
     }
 
-    pub fn endpoints(&self, address: SocketAddr) -> Endpoints {
+    pub fn endpoints(&self, address: SocketAddr, http_ready: bool) -> Endpoints {
         let local = if address.ip().is_unspecified() {
             if address.is_ipv4() {
                 SocketAddr::from(([127, 0, 0, 1], address.port()))
@@ -247,6 +248,7 @@ impl Media {
         };
         let transport = self.transport.as_ref();
         Endpoints {
+            http_ready,
             memory: Some(format!("http://{local}/memfs")),
             memory_auth: Some((self.memory_user.clone(), self.memory_password.to_string())),
             rtmp: transport.and_then(Transport::base_rtmp),

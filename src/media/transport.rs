@@ -8,6 +8,7 @@ use std::{
 };
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
@@ -22,6 +23,7 @@ use super::{
 struct Policy {
     rtmp_token: String,
     srt_token: String,
+    srt_process_token: String,
     prefix: String,
     admin: String,
     admission: Mutex<HashMap<String, Instant>>,
@@ -35,6 +37,7 @@ struct Authorization {
     protocol: String,
     path: String,
     password: String,
+    user: String,
     query: String,
     id: Option<String>,
 }
@@ -66,6 +69,9 @@ async fn auth(State(policy): State<Arc<Policy>>, Json(request): Json<Authorizati
     };
     let valid = expected.is_empty()
         || eq(expected, &request.password)
+        || (request.protocol == "srt"
+            && request.user == "core"
+            && eq(&request.password, &policy.srt_process_token))
         || url::form_urlencoded::parse(request.query.as_bytes())
             .any(|(key, value)| key == "token" && eq(expected, &value));
     if !valid {
@@ -157,6 +163,7 @@ impl Transport {
             prefix,
             rtmp_token: r["token"].as_str().unwrap_or_default().into(),
             srt_token: s["token"].as_str().unwrap_or_default().into(),
+            srt_process_token: URL_SAFE_NO_PAD.encode(s["token"].as_str().unwrap_or_default()),
         });
         let srt_passphrase = s["passphrase"].as_str().unwrap_or_default().to_owned();
         if !srt_passphrase.is_empty() && !(10..=79).contains(&srt_passphrase.len()) {
@@ -366,13 +373,13 @@ impl Transport {
         let mut url =
             url::Url::parse(&format!("srt://{}", local(address))).map_err(|_| Error::Invalid)?;
         let action = if publish { "publish" } else { "read" };
-        let query = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("token", &self.policy.srt_token)
-            .finish();
-        let stream = format!("{action}:{}:{query}", path.trim_start_matches('/'));
-        url.query_pairs_mut()
-            .append_pair("mode", "caller")
-            .append_pair("streamid", &stream);
+        // FFmpeg 6 forwards the Stream ID verbatim. Keep native separators
+        // literal so FFmpeg releases with and without URL decoding agree.
+        let path = path.trim_start_matches('/');
+        let token = &self.policy.srt_process_token;
+        url.set_query(Some(&format!(
+            "mode=caller&streamid={action}:{path}:core:{token}"
+        )));
         if !self.srt_passphrase.is_empty() {
             url.query_pairs_mut()
                 .append_pair("passphrase", &self.srt_passphrase)

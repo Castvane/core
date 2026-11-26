@@ -12,6 +12,7 @@ import subprocess
 import tarfile
 import tempfile
 from urllib.parse import quote
+from uuid import NAMESPACE_URL, uuid5
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,7 +77,9 @@ def main():
     app.update(type="application", name="Castvane Core",
                hashes=[{"alg": "SHA-256", "content": file_hash(binary)}])
     bom = {
+        "$schema": "https://cyclonedx.org/schema/bom-1.6.schema.json",
         "bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+        "serialNumber": uuid5(NAMESPACE_URL, f"https://github.com/Castvane/core/native/{file_hash(binary)}").urn,
         "metadata": {"timestamp": datetime.datetime.fromtimestamp(
             timestamp, tz=datetime.UTC).isoformat(), "component": app},
         "components": [component(packages[key]) for key in sorted(packages) if key != root],

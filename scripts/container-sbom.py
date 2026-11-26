@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 from urllib.parse import quote
+from uuid import NAMESPACE_URL, uuid5
 
 
 def main(output, version):
@@ -32,7 +33,9 @@ def main(output, version):
                            {"name": "castvane:ubuntu:source_version", "value": source_version}],
         })
         direct.append(purl)
-    bom = {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+    bom = {"$schema": "https://cyclonedx.org/schema/bom-1.6.schema.json",
+           "bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+           "serialNumber": uuid5(NAMESPACE_URL, f"https://github.com/Castvane/core/container/{archive_hash}").urn,
            "metadata": {"component": image}, "components": components,
            "dependencies": [{"ref": image["bom-ref"], "dependsOn": direct}, *dependencies]}
     (output / "container.bom.cdx.json").write_text(json.dumps(bom, indent=2) + "\n")

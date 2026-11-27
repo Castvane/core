@@ -816,7 +816,7 @@ async fn process_placeholder_publishes_to_memory_and_cleanup_preserves_other_pro
     let dir = TempDir::new().unwrap();
     let fixture = Fixture::open(&dir, &[("CORE_STORAGE_MEMORY_MAX_SIZE_MBYTES", "4")]).await;
     let other = json!({
-        "id":"owned", "input":[{"id":"src","address":"testsrc2=size=64x64:rate=10","options":["-f","lavfi"]}],
+        "id":"owned", "autostart":false, "input":[{"id":"src","address":"testsrc2=size=64x64:rate=10","options":["-f","lavfi"]}],
         "output":[{"id":"out","address":"{memfs}/protected.ts","options":["-t","0.3","-c:v","mpeg2video","-threads","1","-f","mpegts","-method","PUT"]}]
     });
     let source = json!({
@@ -876,9 +876,13 @@ async fn process_placeholder_publishes_to_memory_and_cleanup_preserves_other_pro
     fixture
         .expect(404, "HEAD", "/memfs/published.ts", Body::empty())
         .await;
-    fixture
-        .expect(200, "GET", "/memfs/protected.ts", Body::empty())
-        .await;
+    assert_eq!(
+        fixture
+            .expect(200, "GET", "/memfs/protected.ts", Body::empty())
+            .await
+            .1,
+        "keep"
+    );
     fixture.close().await;
 }
 

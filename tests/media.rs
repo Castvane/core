@@ -643,11 +643,11 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
         } else {
             let uri = |mode: &str| {
                 format!(
-                    "srt://{srt}?streamid={mode}:color:token=srt-fixture&mode=caller&passphrase=srt-password-fixture&pbkeylen=16"
+                    "srt://{srt}?streamid={mode}:color:token=srt-fixture&mode=caller&passphrase=srt-password-fixture"
                 )
             };
             (
-                uri("publish"),
+                format!("{}&pbkeylen=16", uri("publish")),
                 format!("{}&timeout=10000000", uri("read")),
                 "mpegts",
             )

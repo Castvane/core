@@ -414,9 +414,11 @@ impl Transport {
             "mode=caller&streamid={action}:{path}:core:{token}"
         )));
         if !self.srt_passphrase.is_empty() {
-            url.query_pairs_mut()
-                .append_pair("passphrase", &self.srt_passphrase)
-                .append_pair("pbkeylen", "16");
+            let mut query = url.query_pairs_mut();
+            query.append_pair("passphrase", &self.srt_passphrase);
+            if publish {
+                query.append_pair("pbkeylen", "16");
+            }
         }
         Ok(url.into())
     }

@@ -35,6 +35,7 @@ pub fn routes() -> Router<Arc<App>> {
             .route("/reallocation", put(relocate))
             .route("/node", get(nodes))
             .route("/node/{id}", get(node).post(enroll))
+            .route("/node/{id}/version", get(node_version))
             .route("/node/{id}/fs/{storage}", get(node_files))
             .route(
                 "/node/{id}/fs/{storage}/{*path}",
@@ -62,6 +63,7 @@ pub fn routes() -> Router<Arc<App>> {
                 get(alias_get).put(alias_update).delete(alias_delete),
             )
             .route("/membership", put(voters))
+            .route("/transfer/{id}", put(transfer_leadership))
             .route("/db/kv", get(kv_list))
             .route("/db/kv/{key}", get(kv_get).put(kv_put).delete(kv_delete))
             .route("/db/locks", get(locks))
@@ -154,12 +156,37 @@ async fn enroll(State(app): StateArg, Extension(actor): Actor, Path(id): Path<u6
     Ok(Json(json!("OK")))
 }
 
+async fn node_version(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let id = id.parse().map_err(|_| Failure::Invalid)?;
+    Ok(Json(
+        cluster
+            .diagnostics(id, crate::cluster::diagnostics::Query::Version)
+            .await?,
+    ))
+}
+
 async fn voters(
     State(app): StateArg,
     Extension(actor): Actor,
     data: Result<Json<BTreeSet<u64>>, JsonRejection>,
 ) -> Reply {
     authorized(&app, &actor)?.voters(body(data)?).await?;
+    Ok(Json(json!("OK")))
+}
+
+async fn transfer_leadership(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let target = id.parse().map_err(|_| Failure::Invalid)?;
+    cluster.transfer_leadership(target).await?;
     Ok(Json(json!("OK")))
 }
 

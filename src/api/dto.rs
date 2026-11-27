@@ -42,6 +42,21 @@ pub struct Version<'a> {
     pub build: Option<Build>,
 }
 
+impl Version<'static> {
+    pub(crate) fn full() -> Self {
+        Self {
+            number: env!("CARGO_PKG_VERSION"),
+            build: Some(Build {
+                repository_commit: env!("CASTVANE_BUILD_COMMIT"),
+                repository_branch: option_env!("GITHUB_REF_NAME").unwrap_or("development"),
+                build_date: "",
+                arch: super::build_arch(),
+                compiler: "rustc",
+            }),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct Build {
     pub repository_commit: &'static str,

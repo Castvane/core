@@ -503,6 +503,41 @@ impl Cluster {
         .map_err(|_| Failure::Unavailable)?;
         Ok(())
     }
+
+    pub async fn transfer_leadership(&self, target: u64) -> Result<(), Failure> {
+        self.quorum().await?;
+        if !self.peers.contains_key(&target) {
+            return Err(Failure::Missing);
+        }
+        let voter = self
+            .raft
+            .metrics()
+            .borrow_watched()
+            .membership_config
+            .voter_ids()
+            .any(|id| id == target);
+        if !voter {
+            return Err(Failure::Invalid);
+        }
+        if target == self.id {
+            return Ok(());
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            self.raft
+                .trigger()
+                .transfer_leader(target)
+                .await
+                .map_err(|_| Failure::Unavailable)?;
+            self.raft
+                .wait(None)
+                .current_leader(target, "leadership transfer")
+                .await
+                .map_err(|_| Failure::Unavailable)?;
+            Ok(())
+        })
+        .await
+        .map_err(|_| Failure::Uncertain)?
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

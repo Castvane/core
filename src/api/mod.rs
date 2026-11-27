@@ -1,5 +1,5 @@
 mod cluster;
-mod dto;
+pub(crate) mod dto;
 mod error;
 mod graph;
 mod identity;
@@ -527,19 +527,13 @@ async fn discovery(
     Ok(Json(dto::Discovery {
         app: "datarhei-core",
         auths,
-        version: dto::Version {
-            number: if full {
-                env!("CARGO_PKG_VERSION")
-            } else {
-                concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".0.0")
-            },
-            build: full.then_some(dto::Build {
-                repository_commit: env!("CASTVANE_BUILD_COMMIT"),
-                repository_branch: option_env!("GITHUB_REF_NAME").unwrap_or("development"),
-                build_date: "",
-                arch: build_arch(),
-                compiler: "rustc",
-            }),
+        version: if full {
+            dto::Version::full()
+        } else {
+            dto::Version {
+                number: concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".0.0"),
+                build: None,
+            }
         },
         node,
         capabilities: dto::Capabilities {

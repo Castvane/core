@@ -16,7 +16,10 @@ use openraft::{
     errors::{RPCError, RaftError, Unreachable},
     impls::BasicNode,
     network::RPCOption,
-    raft::{AppendEntriesRequest, AppendEntriesResponse, ReadPolicy, VoteRequest, VoteResponse},
+    raft::{
+        AppendEntriesRequest, AppendEntriesResponse, ReadPolicy, TransferLeaderRequest,
+        TransferLeaderResponse, VoteRequest, VoteResponse,
+    },
 };
 use openraft_legacy::network_v1::{
     Adapter, ChunkedSnapshotReceiver, InstallSnapshotError, InstallSnapshotRequest,
@@ -179,6 +182,14 @@ impl RaftNetwork<Types> for Connection {
     > {
         self.call("snapshot", rpc, option).await
     }
+
+    async fn transfer_leader(
+        &mut self,
+        rpc: TransferLeaderRequest<Types>,
+        option: RPCOption,
+    ) -> Result<TransferLeaderResponse<Types>, RPCError<Types>> {
+        self.call("transfer-leader", rpc, option).await
+    }
 }
 
 fn sender(peer: u64, vote: VoteOf<Types>) -> Result<(), StatusCode> {
@@ -247,6 +258,20 @@ pub async fn serve(
                          Json(rpc): Json<VoteRequest<Types>>| async move {
                             sender(peer, rpc.vote)?;
                             Ok::<_, StatusCode>(Json(raft.vote(rpc).await))
+                        },
+                    ),
+                )
+                .route(
+                    "/transfer-leader",
+                    post(
+                        |State(raft): State<Raft>,
+                         Extension(peer): Extension<u64>,
+                         Json(rpc): Json<TransferLeaderRequest<Types>>| async move {
+                            sender(peer, *rpc.from_leader())?;
+                            if rpc.to_node_id() != raft.node_id() {
+                                return Err(StatusCode::BAD_REQUEST);
+                            }
+                            Ok(Json(raft.handle_transfer_leader(rpc).await))
                         },
                     ),
                 )

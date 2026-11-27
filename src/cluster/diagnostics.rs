@@ -5,6 +5,7 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     routing::post,
 };
+use openraft::rt::WatchReceiver;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -24,6 +25,7 @@ pub struct Worker {
 
 #[derive(Deserialize, Serialize)]
 pub enum Query {
+    Version,
     Report {
         domain: String,
         id: String,
@@ -55,6 +57,7 @@ async fn run(
     }
     let Json(query) = request.map_err(|_| Failure::Invalid)?;
     let value = match query {
+        Query::Version => serde_json::to_value(crate::api::dto::Version::full())?,
         Query::Report { domain, id, epoch } => {
             let key = (domain, id);
             if !worker.gate.owns(&key, epoch) {
@@ -90,6 +93,16 @@ impl Cluster {
     pub async fn diagnostics(&self, id: u64, query: Query) -> Result<Value, Failure> {
         self.quorum().await?;
         let peer = self.peers.get(&id).ok_or(Failure::Missing)?;
+        if !self
+            .raft
+            .metrics()
+            .borrow_watched()
+            .membership_config
+            .nodes()
+            .any(|(node, _)| *node == id)
+        {
+            return Err(Failure::Missing);
+        }
         let mut response = self
             .network
             .client

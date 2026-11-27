@@ -283,6 +283,20 @@ def exercise(binary, root, upgrade_from=None):
         leader_node.call("POST", "/node/4")
         assert any(node["id"] == "4" and not node["voter"] for node in leader_node.call("GET", "/node"))
         print(f"learner enrollment {time.monotonic() - started:.3f}s", flush=True)
+        local_version = cohort[4].request("GET", "/api")[1]["version"]
+        assert leader_node.call("GET", "/node/4/version") == local_version
+        leader_node.call("GET", "/node/999/version", expected=404)
+        leader_node.call("PUT", "/transfer/4", expected=400)
+        leader_node.call("PUT", "/transfer/999", expected=404)
+        leader_node.call("PUT", f"/transfer/{leader_node.id}")
+        target = next(voter for voter in (1, 2, 3) if voter != leader_node.id)
+        assert leader_node.request("PUT", f"/api/v3/cluster/transfer/{target}", auth=False)[0] in (401, 403)
+        assert leader_node.call("PUT", f"/transfer/{target}") == "OK"
+        leader_node = eventually(lambda: cohort[target] if cohort[target].leader() else None,
+                                 "the requested voter did not become leader")
+        assert leader_node.id == target
+        assert leader_node.call("GET", "/db/kv/checkpoint-71")["value"] == 71
+        print(f"Targeted leadership transfer to voter {target} preserved committed state.", flush=True)
 
         # The newly enrolled worker must receive and install a snapshot or catch up before auth succeeds.
         worker = cohort[4]

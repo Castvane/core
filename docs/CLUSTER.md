@@ -43,6 +43,8 @@ Advertise verified hardware encoders through the node.hardware_encoders setting.
 
 Optional CPU rebalancing is disabled by default. To enable it, set rebalance to {"above_percent":90,"below_percent":60,"cooldown_ms":60000} in the cluster node file. Use the same settings on voters. The scheduler chooses one eligible destination for a process without a required node. It records the decision in Raft, stops renewing the old lease, and waits for the ownership handoff. Raft persists the cooldown across leader changes.
 
+Use `PUT /api/v3/cluster/transfer/{id}` on the current leader to hand leadership to a numeric voter ID. The request requires an administrator and quorum. It returns the JSON string `"OK"` after the original node observes the requested leader. A learner cannot become leader. After a timeout, check `GET /api/v3/cluster` before retrying. Before handing leadership over in a mixed-version rollout, upgrade the target to a build that supports the transfer RPC. Use `GET /api/v3/cluster/node/{id}/version` on the leader to read a reachable member's actual build metadata once that member has been upgraded.
+
 ## Availability and recovery
 
 Writes require Raft quorum. After a write timeout, read the committed revision before retrying. KV supports expected revisions. Process updates reject conflicting revisions.

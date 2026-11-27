@@ -585,6 +585,7 @@ fn cluster_paths(spec: &mut Value) {
         ("/snapshot", &["get"][..]),
         ("/node", &["get"][..]),
         ("/node/{id}", &["get", "post"][..]),
+        ("/node/{id}/version", &["get"][..]),
         ("/node/{id}/state", &["get", "put"][..]),
         ("/node/{id}/fs/{storage}", &["get"][..]),
         (
@@ -592,6 +593,7 @@ fn cluster_paths(spec: &mut Value) {
             &["get", "head", "put", "delete"][..],
         ),
         ("/membership", &["put"][..]),
+        ("/transfer/{id}", &["put"][..]),
         ("/deployments", &["get"][..]),
         ("/reallocation", &["put"][..]),
         ("/process", &["get", "post"][..]),
@@ -632,6 +634,32 @@ fn cluster_paths(spec: &mut Value) {
             });
         }
     }
+    spec["components"]["schemas"]["ClusterNodeVersion"] = json!({
+        "type":"object",
+        "required":["number","repository_commit","repository_branch","build_date","arch","compiler"],
+        "properties":{
+            "number":{"type":"string"}, "repository_commit":{"type":"string"},
+            "repository_branch":{"type":"string"}, "build_date":{"type":"string"},
+            "arch":{"type":"string"}, "compiler":{"type":"string"}
+        }
+    });
+    let version = &mut spec["paths"]["/api/v3/cluster/node/{id}/version"]["get"];
+    version["description"] = json!(
+        "Read the actual build metadata from a current member. Requires an administrator on the leader with quorum."
+    );
+    version["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
+    version["responses"]["200"] = json!({
+        "description":"Node build metadata",
+        "content":schema_content("ClusterNodeVersion")
+    });
+
+    let transfer = &mut spec["paths"]["/api/v3/cluster/transfer/{id}"]["put"];
+    transfer["description"] = json!(
+        "Transfer leadership to a current voter. Requires the leader, an administrator, quorum and a writable API."
+    );
+    transfer["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
+    transfer["responses"]["200"] = ok();
+    transfer["responses"]["405"] = error();
 }
 
 fn error() -> Value {

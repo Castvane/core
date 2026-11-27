@@ -6,7 +6,7 @@ The opt-in implementation provides working consensus, persistence and remote dep
 
 The Go cluster has public v3 management handlers, internal cluster clients and forwarding, a Raft-backed store, and leader-side synchronization, placement and relocation. Its scheduler uses node resources and affinity, while authoritative data includes process definitions, IAM, zones, aliases and distributed coordination. Castvane uses an independent internal protocol.
 
-OpenRaft 0.9 provides elections, quorum commits, learners, voting changes, compaction, snapshots and restart recovery. SQLx persists votes and logs using SQLite full synchronization. Committed data and membership apply together. Snapshot installation validates the applied index and membership and uses an atomic SQLite transaction. High-volume observations stay outside consensus.
+OpenRaft 0.10 provides elections, quorum commits, learners, voting changes, compaction, snapshots and restart recovery. SQLx persists votes and logs using SQLite full synchronization. Committed data and membership apply together. Snapshot installation validates the applied index and membership and uses an atomic SQLite transaction. High-volume observations stay outside consensus.
 
 The separate internal listener requires mutual TLS 1.3 with per-node certificates. It binds inbound votes, append messages and snapshot chunks to the configured leaf identity. Outbound clients verify the cluster CA and configured DNS names. Internal paths use the /internal/cluster/v1 prefix and a configured cluster scope. Requests have deadlines, connection limits and bounded bodies. Staging peers and rotating cluster leaf certificates require coordinated configuration changes and restarts.
 
@@ -26,8 +26,8 @@ Cluster paths are under /api/v3/cluster. Administrator authorization and the exi
 
 | Group | Implemented |
 | --- | --- |
-| Topology | GET root, health, snapshot indices, deployments, node list, node detail and node state |
-| Membership | POST preprovisioned node enrollment and PUT replacement voter set; PUT node drain and disable |
+| Topology | GET root, health, snapshot indices, deployments, node list, node detail, live node build metadata and node state |
+| Membership | POST preprovisioned node enrollment and PUT replacement voter set and targeted leadership transfer; PUT node drain and disable |
 | Process | GET, POST, PUT and DELETE definitions; configuration, sampled state, reports, probe, playback origin and metadata; command and relocation PUT |
 | Filesystem | Node mount listing, ranged GET, HEAD, PUT up to 1 MiB, and DELETE |
 | IAM | List, create, update and delete managed identities; list and replace policies |
@@ -38,17 +38,17 @@ For configuration, backup, node roles and supervision assumptions see [cluster i
 
 ## Verification and acceptance
 
-The disposable four-node fixture uses three voters, a learner, isolated TLS identities and generated FFmpeg input. It verifies elections, learner enrollment after log compaction, rejection without a client certificate, KV compare-and-set, lock fencing, distributed IAM authorization and revocation, alias propagation, remote filesystem operations, FFmpeg deployment, relocation, abrupt worker loss, quorum loss, restored voter state, and a bidirectional TCP partition isolating the leader. Unit tests exercise overcommitment and old ownership epochs. Native CI runs the fixture on AMD64 and ARM64.
+The disposable four-node fixture uses three voters, a learner, isolated TLS identities and generated FFmpeg input. It verifies elections, targeted leadership transfer, learner enrollment after log compaction, rejection without a client certificate, KV compare-and-set, lock fencing, distributed IAM authorization and revocation, alias propagation, remote filesystem operations, FFmpeg deployment, relocation, abrupt worker loss, quorum loss, restored voter state, and a bidirectional TCP partition isolating the leader. Unit tests exercise overcommitment and old ownership epochs. Native CI runs the fixture on AMD64 and ARM64.
 
 One Linux AMD64 debug run measured 72 durable writes plus CAS and locks in 0.78 seconds, learner enrollment in 19 ms, remote deployment in 2.20 seconds, relocation in 11.82 seconds and recovery after worker loss in 11.18 seconds. The fixture uses eight-second leases and loopback networking. These are measurements for a small isolated cluster. A subsequent partition fixture accepted a write from the majority after 4.02 seconds and rejected a write from the isolated leader.
 
-RustSec reported no vulnerabilities and the existing unmaintained chrono and humantime advisories. OpenRaft 0.9.26 and its macros are MIT OR Apache-2.0.
+RustSec reported no vulnerabilities and the existing unmaintained chrono and humantime advisories. OpenRaft 0.10.1 and its compatibility adapter are MIT OR Apache-2.0. A rolling upgrade from the prior 0.9.26-based Castvane build passed in the four-node fixture without resetting SQLite or changing the internal v1 RPC contract.
 
 Manual UI acceptance remains open. Test each pinned UI against a disposable cluster with control and media workers. Check the version gate, node list, job assignment, observed progress, relocation, policy administration and aliases. Record response and screen differences with credentials removed.
 
 ## Open Phase 5 work
 
-- Targeted leadership transfer, full leave and learner removal workflows, time-limited enrollment and live identity rotation.
+- Full leave and learner removal workflows, time-limited enrollment and live identity rotation.
 - Memory and GPU pressure rebalancing, pipeline affinity and failure-domain separation, relocation cancellation and dry-run analysis, and per-device encoder and decoder session limits.
 - Distributed certificate issuance and renewal leadership. Cluster mode uses externally coordinated public TLS certificates and declines built-in automatic ACME.
 - Legacy playback redirects, cross-node process references, automatic zone routing, aggregate filesystem views and remote copy/move.

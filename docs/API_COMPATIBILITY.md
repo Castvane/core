@@ -127,10 +127,12 @@ All paths in this table are relative to `/api/v3/cluster`. The Go router only re
 | GET `/db/process`, `/db/process/{id}`, `/db/user`, `/db/user/{name}`, `/db/policies`, `/db/node` | Raw Go store routes are absent. Use the Castvane process, identity, policy and node management routes. |
 | GET `/db/map/process` and `/db/map/reallocate` | Raw Go database maps are absent. Process and deployment views provide Castvane assignments and ownership epochs. |
 | GET `/db/kv` and `/db/locks` | Available with Castvane record revisions and lease tokens. Response shapes differ from Go. |
-| GET `/node/{id}/files`, `/node/{id}/process`, `/node/{id}/version`, `/fs/{storage}` | Reference node summaries and aggregate filesystem listing are absent. Individual mounted storage reads are available through the node filesystem routes. |
+| GET `/node/{id}/files`, `/node/{id}/process`, `/fs/{storage}` | Reference file and process summaries and aggregate filesystem listing are absent. Individual mounted storage reads are available through the node filesystem routes. |
 | PUT `/node/{id}/fs` | Reference remote copy/move is absent. Per-node file PUT and DELETE are supported. |
 | POST `/events`, `/events/log`, `/events/process` | Cluster-wide event forwarding is absent. Use local event subscriptions with the relevant node. |
-| PUT `/transfer/{id}` and `/leave` | Targeted leader transfer and automated leave are absent. Provisioned voting membership can be changed through the Castvane membership route, with quorum. |
+| GET `/node/{id}/version` | Returns the six legacy build fields from the requested reachable member. Castvane reports its own version and leaves the build date empty. Requires an administrator on the leader with quorum. |
+| PUT `/transfer/{id}` | Transfers leadership to the specified numeric voter. Returns the legacy JSON string `"OK"` after the original leader observes that voter in charge. Requires an administrator on the leader with quorum and a writable API. Unknown nodes return 404, learners return 400, and unconfirmed transfers return 503. |
+| PUT `/leave` | Automated leave is open. Provisioned voting membership can be changed through the Castvane membership route, with quorum. |
 | PUT `/iam/reload` | Go-specific policy and identity file reload is absent. Castvane identity updates are replicated commands and authorization uses a quorum-backed read fence. |
 | PUT `/reallocation` | Accepts a JSON object with process `id` and numeric destination `node` or null. Existing Go clients must account for the Castvane placement contract. |
 

@@ -8,6 +8,7 @@ import json
 import os
 import select
 from pathlib import Path
+import random
 import socket
 import ssl
 import subprocess
@@ -32,11 +33,35 @@ def eventually(check, description, seconds=30):
 
 
 def ports(count):
+    try:
+        ephemeral_first, ephemeral_last = map(
+            int, Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split(),
+        )
+    except OSError:
+        ephemeral_first, ephemeral_last = 32768, 65535
+
+    # Nodes and relays make outbound connections before every server is bound,
+    # and nodes later restart on the same ports. Keep fixed listeners outside
+    # the kernel's automatic source-port range.
+    candidates = [
+        port for port in range(16384, 65536)
+        if not ephemeral_first <= port <= ephemeral_last
+    ]
+    random.SystemRandom().shuffle(candidates)
     with ExitStack() as stack:
-        reserved = [stack.enter_context(socket.socket()) for _ in range(count)]
-        for listener in reserved:
-            listener.bind(("127.0.0.1", 0))
-        return [listener.getsockname()[1] for listener in reserved]
+        selected = []
+        for port in candidates:
+            listener = socket.socket()
+            try:
+                listener.bind(("127.0.0.1", port))
+            except OSError:
+                listener.close()
+                continue
+            stack.enter_context(listener)
+            selected.append(port)
+            if len(selected) == count:
+                return selected
+    raise RuntimeError("could not reserve enough fixed cluster fixture ports")
 
 
 def openssl(*args):

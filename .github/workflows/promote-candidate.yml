@@ -63,10 +63,15 @@ jobs:
             directory="candidates/castvane-core-linux-$arch"
             native="castvane-core-$VERSION-linux-$arch.tar.gz"
             cp "$directory/$native" "$directory/$native.sha256" release/
-            cp "$directory/core.bom.cdx.json" "release/core-$arch.bom.cdx.json"
-            cp "$directory/native-build.json" "release/native-$arch.json"
+            cp "$directory/core.bom.cdx.json" "release/core-linux-$arch.bom.cdx.json"
+            cp "$directory/native-build.json" "release/native-linux-$arch.json"
             cp "$directory/container.bom.cdx.json" "release/container-$arch.bom.cdx.json"
           done
+          directory="candidates/castvane-core-windows-amd64"
+          native="castvane-core-$VERSION-windows-amd64.zip"
+          cp "$directory/$native" "$directory/$native.sha256" release/
+          cp "$directory/core.bom.cdx.json" release/core-windows-amd64.bom.cdx.json
+          cp "$directory/native-build.json" release/native-windows-amd64.json
           echo "CASTVANE_RELEASE_REVISION=$revision" >> "$GITHUB_ENV"
       - name: Assemble the exact-version GHCR manifest
         if: inputs.publish_ghcr

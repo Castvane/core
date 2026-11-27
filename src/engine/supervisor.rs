@@ -361,6 +361,7 @@ impl Supervisor {
         let logs = tokio::spawn(collect_logs(
             stderr,
             state.clone(),
+            heartbeat.clone(),
             Arc::new(command.redactor),
             patterns,
             options.log_lines,

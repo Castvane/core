@@ -986,3 +986,47 @@ async fn kernel_limits_attach_and_remove_an_ffmpeg_cgroup() {
     server.state.close().await;
     assert!(!path.exists(), "child cgroup survived shutdown");
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn patched_ffmpeg_progress_updates_state_without_logging_wire_records() {
+    let dir = TempDir::new().unwrap();
+    let fixture = dir.path().join("ffmpeg");
+    let binary = std::env::var("PHASE2_PATCHED_FFMPEG_BINARY").unwrap_or_else(|_| {
+        mock(
+            &fixture,
+            r#"printf '%s\n' 'ffmpeg.inputs:[{"url":"rtmp://user:fixture-secret@localhost/source"}]' >&2
+printf '%s\n' 'ffmpeg.progress:{"time":"0h0m0.25s","frame":3,"packet":4,"size_bytes":2048,"outputs":[{"index":0,"stream":0,"frame":3,"packet":4,"size_bytes":2048}]}' >&2
+echo 'ordinary FFmpeg log line' >&2
+sleep 30"#,
+        );
+        fixture.to_str().unwrap().to_owned()
+    });
+    let server = Server::open(&dir, &[("CORE_FFMPEG_BINARY", &binary)]).await;
+    let mut process = synthetic("jsonstats");
+    process["autostart"] = true.into();
+    server
+        .expect(200, "POST", "/api/v3/process", Some(process))
+        .await;
+    let state = server
+        .wait_state("jsonstats", |state| {
+            state["progress"]["started"] == true
+                && state["progress"]["packet"].as_u64().unwrap_or_default() > 0
+        })
+        .await;
+    let progress = &state["progress"];
+    assert!(progress["time"].as_f64().unwrap() > 0.0);
+    assert_eq!(progress["outputs"][0]["id"], "end");
+    assert!(progress["outputs"][0]["packet"].as_u64().unwrap() > 0);
+    server.order("jsonstats", "stop").await;
+    let report = server.wait_reports("jsonstats", 1).await;
+    assert!(report["history"][0]["progress"]["packet"].as_u64().unwrap() > 0);
+    let report = report.to_string();
+    assert!(!report.contains("ffmpeg.inputs:"));
+    assert!(!report.contains("ffmpeg.progress:"));
+    assert!(!report.contains("fixture-secret"));
+    if binary.as_str() == fixture.to_str().unwrap() {
+        assert!(report.contains("ordinary FFmpeg log line"));
+    }
+    server.state.close().await;
+}

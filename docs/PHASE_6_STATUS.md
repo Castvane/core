@@ -67,8 +67,8 @@ The control API still runs beside third-party media executables. The process sup
 
 | Area | Landed | Remaining |
 | --- | --- | --- |
-| 0–1 Bootstrap, API and authentication | Native CI baseline, persistent config, local JWT, API fixtures | Finish the versioned API and capability contracts needed by the first-party UI. Legacy browser results remain historical evidence. |
-| 2 Process engine | Real FFmpeg supervision, progress, scheduling, recovery, persistence and scoped process settings | Full fields and limits for custom FFmpeg extensions and additional legacy shapes remain open. |
+| 0–1 Bootstrap, API and authentication | Native CI baseline, persistent config, local JWT, API fixtures, and the versioned UI discovery contract | Verify downstream UI integration and complete per-operation contracts. Legacy browser results remain historical evidence. |
+| 2 Process engine | Real FFmpeg supervision, standard and patched FFmpeg 9.1 numeric progress, scheduling, recovery, persistence and scoped process settings | Full fields and limits for custom FFmpeg extensions and additional legacy shapes remain open. |
 | 3 Media and storage | Disk, memory, S3, MediaMTX-compatible RTMP/RTMPS/SRT, HLS, DASH, HTTP-FLV, sessions and aliases | Live playout requires extended FFmpeg. Some wire telemetry, provider and player acceptance remain open. |
 | 4 Operations and IAM | Local IAM and explicit deny, metrics, health, bounded events/audit, TLS and ACME | Auth0, some delegated administration forms, broader metrics and physical hardware tests remain open. |
 | 5 Clustering | Raft and mTLS, quorum-fenced scheduling, remote diagnostics, leases, IAM, zones, aliases and KV | Complete membership lifecycle, live identity/CA rotation, distributed TLS, richer placement, cross-node references and legacy cluster route parity remain open. See [Phase 5](PHASE_5_STATUS.md#open-phase-5-work). |
@@ -83,7 +83,7 @@ Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do
 - [x] Build native candidates for Linux AMD64, Linux ARM64 and Windows AMD64 and Docker candidates for Linux AMD64 and ARM64. Verify their checksums and attestations.
 - [x] Exercise backup and independently authored migration fixtures, including a store created by the pinned Go executable.
 - [x] Exercise pinned UI discovery/login/refresh with existing bundles and retain exact blockers.
-- [ ] Complete remaining route and schema checks and verify the API and capability contracts for first-party UI integration.
+- [ ] Complete remaining route and schema checks. Verify first-party UI integration against the implemented discovery and capability contract.
 - [ ] Complete Phase 5 membership administration, distributed certificate management and cross-node workflow parity.
 - [ ] Close the roadmap gaps for Auth0 federation, extended FFmpeg live playout and telemetry, and encrypted SRT interoperability with the supported Linux production FFmpeg build. Native Windows encrypted SRT playback is unsupported and outside release acceptance.
 - [ ] Validate the 24-hour and 72-hour workloads, real-provider S3, physical GPU and multi-host deployment on representative infrastructure.

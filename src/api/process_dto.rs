@@ -228,17 +228,32 @@ fn progress(
     inputs: &[(String, String)],
     outputs: &[(String, String)],
 ) -> Value {
-    fn io(items: &[(String, String)]) -> Vec<Value> {
-        items.iter().enumerate().map(|(index,(id,address))| json!({
-            "id":id,"address":address,"index":index,"stream":0,"format":"","type":"","codec":"","coder":"",
-            "profile":0,"level":0,"frame":0,"keyframe":0,"framerate":{"min":0,"max":0,"avg":0},
-            "fps":0,"packet":0,"pps":0,"size_kb":0,"bitrate_kbit":0,"extradata_size_bytes":0,
-            "iomap":[],"avstream":null,"tee":[]
-        })).collect()
+    fn io(items: &[(String, String)], streams: &[engine::StreamProgress]) -> Vec<Value> {
+        let mut result = Vec::new();
+        for (index, (id, address)) in items.iter().enumerate() {
+            let mut found = streams
+                .iter()
+                .filter(|stream| stream.index == index)
+                .peekable();
+            let empty = engine::StreamProgress::default();
+            let matching = (found.peek().is_none())
+                .then_some(&empty)
+                .into_iter()
+                .chain(found);
+            for stream in matching {
+                result.push(json!({
+                    "id":id,"address":address,"index":index,"stream":stream.stream,"format":"","type":"","codec":"","coder":"",
+                    "profile":0,"level":0,"frame":stream.frame,"keyframe":stream.keyframe,"framerate":stream.framerate,
+                    "fps":stream.framerate.avg,"packet":stream.packet,"pps":0,"size_kb":stream.size_bytes / 1024,
+                    "bitrate_kbit":0,"extradata_size_bytes":stream.extradata_size_bytes,"iomap":[],"avstream":null,"tee":[]
+                }));
+            }
+        }
+        result
     }
     json!({
-        "started":progress.started, "inputs":io(inputs),"outputs":io(outputs),"mapping":{"graphs":[],"mapping":[]},
-        "frame":progress.frame,"packet":0,"fps":progress.fps,"q":progress.quality,
+        "started":progress.started, "inputs":io(inputs,&progress.inputs),"outputs":io(outputs,&progress.outputs),"mapping":{"graphs":[],"mapping":[]},
+        "frame":progress.frame,"packet":progress.packet,"fps":progress.fps,"q":progress.quality,
         "size_kb":progress.bytes / 1024,"time":progress.seconds,"bitrate_kbit":progress.bitrate,
         "speed":progress.speed,"drop":progress.drop,"dup":progress.dup
     })
@@ -325,6 +340,7 @@ struct ReportEntry {
 struct WireProgress {
     started: bool,
     frame: u64,
+    packet: u64,
     fps: f64,
     q: f64,
     size_kb: u64,
@@ -401,6 +417,7 @@ impl ImportReport {
                     progress: item.progress.map(|value| Progress {
                         started: value.started,
                         frame: value.frame,
+                        packet: value.packet,
                         fps: value.fps,
                         quality: value.q,
                         bytes: value.size_kb.saturating_mul(1024),
@@ -409,6 +426,7 @@ impl ImportReport {
                         speed: value.speed,
                         drop: value.drop,
                         dup: value.dup,
+                        ..Progress::default()
                     }),
                     usage: item.resources.map(|value| Usage {
                         cpu: value.cpu_usage.cur,

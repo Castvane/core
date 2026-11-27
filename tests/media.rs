@@ -646,6 +646,11 @@ async fn transport_interoperability(protocols: &[&str], encrypted_srt: bool) {
         ],
     )
     .await;
+    let discovery = fixture.json(200, "GET", "/api", None).await;
+    assert_eq!(
+        discovery["capabilities"]["transports"],
+        json!({"rtmp":true,"rtmps":true,"srt":true,"http_flv":true})
+    );
     let srt_ffmpeg =
         std::env::var_os("PHASE3_SRT_FFMPEG_BINARY").unwrap_or_else(|| "ffmpeg".into());
     for &wire in protocols {

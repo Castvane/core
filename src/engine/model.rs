@@ -102,6 +102,32 @@ pub struct Progress {
     pub speed: f64,
     pub drop: u64,
     pub dup: u64,
+    pub packet: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<StreamProgress>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<StreamProgress>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StreamProgress {
+    pub index: usize,
+    pub stream: usize,
+    pub frame: u64,
+    pub keyframe: u64,
+    pub packet: u64,
+    pub size_bytes: u64,
+    pub extradata_size_bytes: u64,
+    pub framerate: FrameRate,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FrameRate {
+    pub min: f64,
+    pub max: f64,
+    pub avg: f64,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]

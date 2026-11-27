@@ -342,8 +342,26 @@ fn process_paths(spec: &mut Value) {
     }});
     schemas["ProcessState"] = json!({"type":"object","required":["order","exec","progress","resources"],"properties":{
         "order":{"enum":["start","stop"]},"exec":{"enum":["finished","starting","running","finishing","failed","killed"]},
-        "progress":{"type":"object"},"resources":{"type":"object"},"pid":{"type":"integer"},
+        "progress":{"$ref":"#/components/schemas/ProcessProgress"},"resources":{"type":"object"},"pid":{"type":"integer"},
         "limit_mode":{"enum":["hard","soft","none"]}
+    }});
+    schemas["ProcessProgress"] = json!({"type":"object","properties":{
+        "started":{"type":"boolean"},"frame":{"type":"integer"},"packet":{"type":"integer"},
+        "fps":{"type":"number"},"q":{"type":"number"},"size_kb":{"type":"integer"},
+        "time":{"type":"number","description":"Output timestamp in seconds"},
+        "bitrate_kbit":{"type":"number"},"speed":{"type":"number"},
+        "drop":{"type":"integer"},"dup":{"type":"integer"},
+        "inputs":{"type":"array","items":{"$ref":"#/components/schemas/ProcessStreamProgress"}},
+        "outputs":{"type":"array","items":{"$ref":"#/components/schemas/ProcessStreamProgress"}},
+        "mapping":{"type":"object"}
+    }});
+    schemas["ProcessStreamProgress"] = json!({"type":"object","properties":{
+        "id":{"type":"string"},"address":{"type":"string"},"index":{"type":"integer"},"stream":{"type":"integer"},
+        "frame":{"type":"integer"},"keyframe":{"type":"integer"},"packet":{"type":"integer"},
+        "size_kb":{"type":"integer"},"extradata_size_bytes":{"type":"integer"},
+        "fps":{"type":"number"},"framerate":{"type":"object","properties":{
+            "min":{"type":"number"},"max":{"type":"number"},"avg":{"type":"number"}
+        }}
     }});
     schemas["ProcessReport"] = json!({"type":"object","required":["history"],"properties":{
         "history":{"type":"array","items":{"type":"object"}}

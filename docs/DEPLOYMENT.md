@@ -37,6 +37,23 @@ Intel and AMD deploy the same image with matching userspace drivers and explicit
 
 Use a firewall or dedicated network to isolate admin, metrics, cluster RPC and media ingress according to role. Keep TLS permissions and renewal storage private. With a reverse proxy, overwrite forwarded address/protocol headers at the trust boundary, set only the applicable proxy ranges, and preserve the incoming hostname and range headers. Disable loopback authentication bypass for a proxy on the same host. See [local TLS, ACME and API policy](PHASE_4_STATUS.md). Use the [cluster guide](CLUSTER.md) for combined, control-only and worker nodes.
 
+### Public TLS behind a reverse proxy
+
+When the reverse proxy owns the public certificate and ACME renewal, configure its upstream as the Core HTTP listener. Keep that listener on loopback when the proxy runs on the same host. For a proxy from another host or container, use a private address and restrict access to the proxy network. Configure TLS and challenge routing at the proxy.
+
+```sh
+CORE_BIND_ADDR=127.0.0.1:8080
+CORE_TLS_ENABLE=false
+CORE_TLS_AUTO=false
+CORE_API_AUTH_ENABLE=true
+CORE_API_AUTH_DISABLE_LOCALHOST=false
+CORE_API_ACCESS_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+Replace the proxy range with the exact source address Core sees. The proxy must send the actual client IP and a single `X-Forwarded-Proto: https` value for HTTPS traffic. Core then applies its HTTPS API access policy. Provision the login secret through the normal deployment configuration. Run `python3 scripts/test-reverse-proxy.py target/release/restreamer-core` for the isolated Linux check of TLS termination, authentication, and trusted forwarding.
+
+### Monitoring
+
 Use a scraper on a private listener and restrict metrics with network policy. Enable Prometheus metrics and assign a managed identity the `api` resource `/metrics` with action `read`. Write its access JWT to a private credentials file and rotate it before expiration. The [Prometheus example](../examples/monitoring/prometheus.yml) consumes that file. Import the [Grafana example](../examples/monitoring/grafana.json) and select that Prometheus data source. Optional GPU and cluster panels show data only when the service reports those series. Tune alerting to readiness failures, FFmpeg restarts, decreasing disk space, viewer saturation and certificate deadlines. Use authenticated cluster health to check quorum. `/readyz` checks that a clustered node observes a leader and sees itself in membership, which can lag during a partition. Collect bounded logs to an external service when extended retention is required. [Operations metrics](PHASE_4_STATUS.md)
 
 ## Backup and restore

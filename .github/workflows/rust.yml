@@ -32,6 +32,7 @@ jobs:
       - run: bash scripts/test-minio.sh
       - run: cargo build --locked --release
       - run: bash scripts/test-acme.sh target/release/restreamer-core
+      - run: python3 scripts/test-reverse-proxy.py target/release/restreamer-core
       - run: bash scripts/smoke-test.sh target/release/restreamer-core
       - run: python3 scripts/test-cluster.py target/release/restreamer-core
       - name: Exercise recovery under concurrent media and API load

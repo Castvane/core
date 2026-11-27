@@ -134,7 +134,7 @@ All paths in this table are relative to `/api/v3/cluster`. The Go router only re
 | POST `/events`, `/events/log`, `/events/process` | Cluster-wide event forwarding is absent. Use local event subscriptions with the relevant node. |
 | GET `/node/{id}/version` | Returns the six legacy build fields from the requested reachable member. Castvane reports its own version and leaves the build date empty. Requires an administrator on the leader with quorum. |
 | PUT `/transfer/{id}` | Transfers leadership to the specified numeric voter. Returns the legacy JSON string `"OK"` after the original leader observes that voter in charge. Requires an administrator on the leader with quorum and a writable API. Unknown nodes return 404, learners return 400, and unconfirmed transfers return 503. |
-| PUT `/leave` | Automated leave is open. Provisioned voting membership can be changed through the Castvane membership route, with quorum. |
+| PUT `/leave` | Submit `{"id":"4"}` to the current leader to remove a drained voter or learner with no assignments. Returns the legacy JSON string `"OK"`, 404 for unknown members, and 409 for the current leader, an undrained member, or an outstanding assignment. Unknown or expired leadership returns 503. Castvane requires explicit leadership transfer and uses the current leader for removal. |
 | PUT `/iam/reload` | Go-specific policy and identity file reload is absent. Castvane identity updates are replicated commands and authorization uses a quorum-backed read fence. |
 | PUT `/reallocation` | Accepts a JSON object with process `id` and numeric destination `node` or null. Existing Go clients must account for the Castvane placement contract. |
 

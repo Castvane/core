@@ -403,11 +403,28 @@ def exercise(binary, root, upgrade_from=None):
         replay.start()
         recovered = eventually(leader, "restarted voter did not restore quorum")
         assert recovered.call("GET", "/db/kv/checkpoint-71")["value"] == 71
+        eventually(lambda: media_running(recovered, 4), "worker did not resume after quorum recovery")
+        recovered.call("PUT", "/leave", {"id": "4"}, expected=409)
+        recovered.call("PUT", "/node/4/state", {"draining": True, "disabled": False})
+        recovered.call("PUT", "/leave", {"id": "4"}, expected=409)
         recovered.call("PUT", "/process/video/command", {"command": "stop"})
         eventually(lambda: recovered.call("GET", "/process/video/state")["assignment"] is None,
                    "process assignment was not released")
         recovered.call("DELETE", "/process/video")
         print("Quorum loss, restored voting state, and lease cleanup passed.", flush=True)
+
+        recovered.call("PUT", "/leave", {"id": "999"}, expected=404)
+        recovered.call("PUT", "/leave", expected=409)
+        assert recovered.call("PUT", "/leave", {"id": "4"}) == "OK"
+        recovered.call("GET", "/node/4/state", expected=404)
+        recovered.call("PUT", "/node/4/state", {"draining": False, "disabled": False}, expected=404)
+        recovered.call("POST", "/node/4")
+        assert recovered.call("GET", "/node/4/state")["draining"] is True
+        recovered.call("PUT", "/node/2/state", {"draining": True, "disabled": False})
+        assert recovered.call("PUT", "/leave", {"id": "2"}) == "OK"
+        assert all(node["id"] != "2" for node in recovered.call("GET", "/node"))
+        assert recovered.call("GET", "/db/kv/checkpoint-71")["value"] == 71
+        print("Drained learner and voter removal passed with quorum and no new assignments.", flush=True)
     except BaseException:
         for node in cohort.values():
             log = node.directory / "output.log"

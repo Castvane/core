@@ -4,7 +4,11 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State, rejection::JsonRejection},
+    body::Bytes,
+    extract::{
+        Path, Query, State,
+        rejection::{BytesRejection, JsonRejection},
+    },
     http::{StatusCode, Uri},
     response::IntoResponse,
     routing::{get, put},
@@ -68,6 +72,7 @@ pub fn routes() -> Router<Arc<App>> {
             )
             .route("/membership", put(voters))
             .route("/transfer/{id}", put(transfer_leadership))
+            .route("/leave", put(leave))
             .route("/db/kv", get(kv_list))
             .route("/db/kv/{key}", get(kv_get).put(kv_put).delete(kv_delete))
             .route("/db/locks", get(locks))
@@ -236,13 +241,44 @@ async fn transfer_leadership(
     Ok(Json(json!("OK")))
 }
 
+#[derive(Deserialize)]
+struct LeaveMember {
+    id: Option<String>,
+}
+
+async fn leave(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    input: Result<Bytes, BytesRejection>,
+) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let input = input.map_err(|_| ApiError::bad_request("invalid membership request"))?;
+    if input.len() > 1024 {
+        return Err(ApiError::Http(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "membership request exceeds 1 KiB",
+        ));
+    }
+    let target = if input.is_empty() {
+        cluster.id
+    } else {
+        let data: LeaveMember = serde_json::from_slice(&input)
+            .map_err(|_| ApiError::bad_request("invalid membership request"))?;
+        data.id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .map(str::parse)
+            .transpose()
+            .map_err(|_| Failure::Invalid)?
+            .unwrap_or(cluster.id)
+    };
+    cluster.remove_member(target).await?;
+    Ok(Json(json!("OK")))
+}
+
 async fn node_state(State(app): StateArg, Extension(actor): Actor, Path(id): Path<u64>) -> Reply {
     let cluster = authorized(&app, &actor)?;
-    let state = cluster.committed().await?;
-    let record = state
-        .get(Collection::Node, &id.to_string())
-        .ok_or(Failure::Missing)?;
-    Ok(Json(record.value.clone()))
+    Ok(Json(cluster.node_state(id).await?))
 }
 
 #[derive(Deserialize)]
@@ -259,20 +295,8 @@ async fn set_node_state(
 ) -> Reply {
     let cluster = authorized(&app, &actor)?;
     let data = body(data)?;
-    let key = id.to_string();
-    let state = cluster.committed().await?;
-    let record = state.get(Collection::Node, &key).ok_or(Failure::Missing)?;
-    let mut node: Node =
-        serde_json::from_value(record.value.clone()).map_err(|_| Failure::Invalid)?;
-    node.draining = data.draining;
-    node.disabled = data.disabled;
     cluster
-        .write(Action::Put {
-            collection: Collection::Node,
-            key,
-            value: json!(node),
-            expected: Some(record.revision),
-        })
+        .set_node_state(id, data.draining, data.disabled)
         .await?;
     Ok(Json(json!("OK")))
 }

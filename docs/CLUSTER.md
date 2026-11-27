@@ -47,6 +47,8 @@ Use `PUT /api/v3/cluster/transfer/{id}` on the current leader to hand leadership
 
 Read the selected member's file inventory at `/api/v3/cluster/node/{id}/files` and its live job list at `/api/v3/cluster/node/{id}/process`. Use `filter=state` for process progress without full configurations and reports. `GET /api/v3/cluster/fs/{storage}` lists matching files across reachable members. It preserves duplicates and includes an `X-Castvane-Unavailable-Nodes` count. Narrow large listings with a glob. Use the node-specific storage routes to select the member for a download or write.
 
+To remove a member, set `draining: true` on its node state route and wait until assignments clear. Transfer leadership first if the node is the leader. Send `PUT /api/v3/cluster/leave` with `{"id":"4"}` to the current leader and verify that the member disappears from `GET /api/v3/cluster/node`. The drained state survives re-enrollment so an administrator can validate the returning node before approving new assignments. Membership removal leaves static peer certificates and provisioning intact. Remove the retired peer from the provisioned trust configuration as part of decommissioning.
+
 ## Availability and recovery
 
 Writes require Raft quorum. After a write timeout, read the committed revision before retrying. KV supports expected revisions. Process updates reject conflicting revisions.

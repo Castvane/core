@@ -13,16 +13,19 @@ use std::{
 };
 
 use openraft::{
-    ServerState,
+    Precondition, ServerState,
     alias::LogIdOf,
-    impls::BasicNode,
+    impls::{BasicNode, ChangeMembers},
     raft::ReadPolicy,
     rt::{Instant as _, WatchReceiver},
 };
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::{net::TcpListener, sync::Semaphore};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, Semaphore},
+};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
@@ -87,6 +90,7 @@ pub struct Cluster {
     network: Network,
     telemetry: work::SharedTelemetry,
     file_listings: Semaphore,
+    topology: Mutex<()>,
     lease_ms: u64,
     rebalance: Option<Rebalance>,
 }
@@ -293,6 +297,7 @@ impl Cluster {
             network,
             telemetry,
             file_listings: Semaphore::new(4),
+            topology: Mutex::new(()),
             lease_ms: settings.lease_ms,
             rebalance: settings.rebalance,
         }))
@@ -457,6 +462,7 @@ impl Cluster {
     }
 
     pub async fn enroll(&self, id: u64) -> Result<(), Failure> {
+        let _update = self.topology.try_lock().map_err(|_| Failure::Conflict)?;
         let peer = self.peers.get(&id).ok_or(Failure::Invalid)?;
         self.quorum().await?;
         tokio::time::timeout(
@@ -486,6 +492,7 @@ impl Cluster {
     }
 
     pub async fn voters(&self, ids: BTreeSet<u64>) -> Result<(), Failure> {
+        let _update = self.topology.try_lock().map_err(|_| Failure::Conflict)?;
         if ids.is_empty()
             || ids.iter().any(|id| {
                 self.peers
@@ -507,6 +514,7 @@ impl Cluster {
     }
 
     pub async fn transfer_leadership(&self, target: u64) -> Result<(), Failure> {
+        let _update = self.topology.try_lock().map_err(|_| Failure::Conflict)?;
         self.quorum().await?;
         if !self.peers.contains_key(&target) {
             return Err(Failure::Missing);
@@ -539,6 +547,111 @@ impl Cluster {
         })
         .await
         .map_err(|_| Failure::Uncertain)?
+    }
+
+    pub async fn node_state(&self, id: u64) -> Result<Value, Failure> {
+        self.quorum().await?;
+        let machine = self
+            .store
+            .machine()
+            .await
+            .map_err(|_| Failure::Unavailable)?;
+        if machine.membership.get_node(&id).is_none() {
+            return Err(Failure::Missing);
+        }
+        machine
+            .data
+            .get(Collection::Node, &id.to_string())
+            .map(|record| record.value.clone())
+            .ok_or(Failure::Missing)
+    }
+
+    pub async fn set_node_state(
+        &self,
+        id: u64,
+        draining: bool,
+        disabled: bool,
+    ) -> Result<(), Failure> {
+        let _update = self.topology.try_lock().map_err(|_| Failure::Conflict)?;
+        self.quorum().await?;
+        let machine = self
+            .store
+            .machine()
+            .await
+            .map_err(|_| Failure::Unavailable)?;
+        if machine.membership.get_node(&id).is_none() {
+            return Err(Failure::Missing);
+        }
+        let key = id.to_string();
+        let record = machine
+            .data
+            .get(Collection::Node, &key)
+            .ok_or(Failure::Missing)?;
+        let mut node: Node =
+            serde_json::from_value(record.value.clone()).map_err(|_| Failure::Invalid)?;
+        node.draining = draining;
+        node.disabled = disabled;
+        let value = serde_json::to_value(node).map_err(|_| Failure::Invalid)?;
+        self.write(Action::Put {
+            collection: Collection::Node,
+            key,
+            value,
+            expected: Some(record.revision),
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn remove_member(&self, id: u64) -> Result<(), Failure> {
+        let _update = self.topology.try_lock().map_err(|_| Failure::Conflict)?;
+        self.quorum().await?;
+        if id == self.id {
+            return Err(Failure::Conflict);
+        }
+        let machine = self
+            .store
+            .machine()
+            .await
+            .map_err(|_| Failure::Unavailable)?;
+        let membership = machine.membership;
+        if membership.get_node(&id).is_none() {
+            return Err(Failure::Missing);
+        }
+        let state = &machine.data;
+        let record = state
+            .get(Collection::Node, &id.to_string())
+            .ok_or(Failure::Conflict)?;
+        let node: Node =
+            serde_json::from_value(record.value.clone()).map_err(|_| Failure::Invalid)?;
+        if !node.draining
+            || state
+                .records(Collection::Process)
+                .any(|(_, record)| record.value["assignment"]["node"].as_u64() == Some(id))
+        {
+            return Err(Failure::Conflict);
+        }
+        let ids = BTreeSet::from([id]);
+        let change = if membership.voter_ids().any(|voter| voter == id) {
+            ChangeMembers::RemoveVoters(ids)
+        } else {
+            ChangeMembers::RemoveNodes(ids)
+        };
+        tokio::time::timeout(
+            Duration::from_secs(8),
+            self.raft.change_membership_if(
+                change,
+                false,
+                // Reject a concurrent change to the drain state, assignments or membership.
+                [Precondition::LastLogId {
+                    last_log_id: machine.last,
+                }],
+            ),
+        )
+        .await
+        .map_err(|_| Failure::Uncertain)?
+        .map_err(|_| Failure::Unavailable)?;
+        // Retain the drained node record so a provisioned node stays drained if enrolled again.
+        Ok(())
     }
 }
 

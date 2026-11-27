@@ -597,6 +597,7 @@ fn cluster_paths(spec: &mut Value) {
         ),
         ("/membership", &["put"][..]),
         ("/transfer/{id}", &["put"][..]),
+        ("/leave", &["put"][..]),
         ("/deployments", &["get"][..]),
         ("/reallocation", &["put"][..]),
         ("/process", &["get", "post"][..]),
@@ -663,6 +664,19 @@ fn cluster_paths(spec: &mut Value) {
     transfer["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
     transfer["responses"]["200"] = ok();
     transfer["responses"]["405"] = error();
+
+    let leave = &mut spec["paths"]["/api/v3/cluster/leave"]["put"];
+    leave["description"] = json!(
+        "Remove a drained voter or learner with no assignments. Requires the leader, an administrator, quorum and a writable API. Transfer leadership before removing the current leader."
+    );
+    leave["requestBody"] = json!({
+        "content":{"application/json":{"schema":{"type":"object",
+            "required":["id"],"properties":{"id":{"type":"string","pattern":"^[0-9]+$"}}
+        },"example":{"id":"4"}}}
+    });
+    leave["responses"]["200"] = ok();
+    leave["responses"]["405"] = error();
+    leave["responses"]["413"] = error();
 
     let node_files = &mut spec["paths"]["/api/v3/cluster/node/{id}/files"]["get"];
     node_files["description"] = json!(

@@ -27,7 +27,7 @@ Cluster paths are under /api/v3/cluster. Administrator authorization and the exi
 | Group | Implemented |
 | --- | --- |
 | Topology | GET root, health, snapshot indices, deployments, node list, node detail, live node build metadata, node process list and node state |
-| Membership | POST preprovisioned node enrollment and PUT replacement voter set and targeted leadership transfer; PUT node drain and disable |
+| Membership | POST preprovisioned node enrollment, PUT replacement voter set, targeted leadership transfer, node drain and disable, and removal of drained voters and learners |
 | Process | GET, POST, PUT and DELETE definitions; configuration, sampled state, reports, probe, playback origin and metadata; command and relocation PUT |
 | Filesystem | Member file inventory, aggregate storage listing, node mount listing, ranged GET, HEAD, PUT up to 1 MiB, and DELETE |
 | IAM | List, create, update and delete managed identities; list and replace policies |
@@ -48,7 +48,7 @@ Manual UI acceptance remains open. Test each pinned UI against a disposable clus
 
 ## Open Phase 5 work
 
-- Full leave and learner removal workflows, time-limited enrollment and live identity rotation.
+- Automatic leave forwarding and leadership handoff for a self-removing leader, time-limited enrollment and live identity rotation.
 - Memory and GPU pressure rebalancing, pipeline affinity and failure-domain separation, relocation cancellation and dry-run analysis, and per-device encoder and decoder session limits.
 - Distributed certificate issuance and renewal leadership. Cluster mode uses externally coordinated public TLS certificates and declines built-in automatic ACME.
 - Legacy playback redirects, cross-node process references, automatic zone routing and remote copy/move.

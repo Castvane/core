@@ -33,11 +33,7 @@ jobs:
           [[ "$version" =~ ^restreamer-core\ [0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+\ \($GITHUB_SHA\)$ ]]
       - run: bash scripts/smoke-test.sh target/release/restreamer-core
       - run: python3 scripts/package-release.py target/release/restreamer-core dist
-      - name: Test image built with Ubuntu FFmpeg
-        run: bash scripts/test-container.sh target/release/restreamer-core
-      - name: Package administrator-supplied FFmpeg image
-        env:
-          CASTVANE_BUNDLE_FFMPEG: 'false'
+      - name: Smoke-test and package the Core-only image
         run: bash scripts/test-container.sh target/release/restreamer-core dist
       - name: Attest the native and container archives
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

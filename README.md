@@ -2,7 +2,7 @@
 
 Castvane Core is an independent MIT-licensed Rust engine for FFmpeg orchestration and media delivery. It implements the legacy Restreamer v3 control API. The executable retains the `restreamer-core` name for deployment compatibility.
 
-Native builds target Linux AMD64 and ARM64 and Windows AMD64. The [Windows guide](docs/WINDOWS.md) covers MSVC builds, operator-supplied FFmpeg, and running the portable executable without WSL or Docker.
+Native builds target Linux AMD64 and ARM64 and Windows AMD64. This repository builds the Core-only OCI image for GitHub Container Registry and Docker Hub. A separate distribution repository will build the plug-and-play image with FFmpeg and FFprobe. The [Windows guide](docs/WINDOWS.md) covers MSVC builds, operator-supplied FFmpeg, and running the portable executable without WSL or Docker.
 
 ## Development
 

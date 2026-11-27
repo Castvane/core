@@ -19,7 +19,7 @@ restreamer-core serve
 
 ## Container installation
 
-Build the default operator image with Ubuntu's FFmpeg and FFprobe, or use the Core-only candidate with an administrator-provided compatible pair. The image uses UID/GID 10001 and stores data under `/var/lib/castvane`. RTMP, RTMPS, SRT and HTTP-FLV require an independently supplied MediaMTX service binary in addition to the Core and FFmpeg media tools.
+Build or download the Core-only image. For media processing, supply compatible Linux FFmpeg and FFprobe executables and their runtime libraries. Add a read-only bind mount at `/opt/media-tools` using a Compose override. The image includes that directory in its PATH. The plug-and-play image with bundled executables will come from a separate distribution repository. The image uses UID/GID 10001 and stores data under `/var/lib/castvane`. RTMP, RTMPS, SRT and HTTP-FLV require an independently supplied MediaMTX service binary in addition to the Core and FFmpeg media tools.
 
 ```sh
 cargo build --locked --release

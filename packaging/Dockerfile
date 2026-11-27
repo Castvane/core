@@ -8,7 +8,6 @@ RUN install -D -m 0755 /tmp/castvane/restreamer-core /out/usr/local/bin/restream
 FROM ${BASE}
 ARG VERSION=development
 ARG REVISION=unknown
-ARG BUNDLE_FFMPEG=true
 LABEL org.opencontainers.image.title="Castvane Core" \
       org.opencontainers.image.source="https://github.com/Castvane/core" \
       org.opencontainers.image.version="${VERSION}" \
@@ -16,11 +15,10 @@ LABEL org.opencontainers.image.title="Castvane Core" \
       org.opencontainers.image.licenses="MIT"
 COPY --from=assemble /out/ /
 RUN apt-get update \
-    && if [ "$BUNDLE_FFMPEG" = true ]; then packages="ffmpeg"; else packages=""; fi \
-    && apt-get install -y --no-install-recommends ca-certificates $packages \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -m 0700 -o 10001 -g 10001 /var/lib/castvane /var/lib/castvane/media \
-    && if [ "$BUNDLE_FFMPEG" = true ]; then ffmpeg -version; else echo "FFmpeg supplied by operator"; fi \
+    && echo "FFmpeg supplied by operator" \
         > /usr/share/doc/castvane-core/ffmpeg-build.txt \
     && dpkg-query -W '--showformat=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' \
         > /usr/share/doc/castvane-core/runtime-packages.tsv

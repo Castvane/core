@@ -30,7 +30,7 @@ Read [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap and compat
 
 See [bootstrap decisions](docs/BOOTSTRAP.md) for the Linux amd64/arm64 target policy, FFmpeg distribution model, pinned reference UI versions, and verification checklist.
 
-For native and container candidates, backup and rollback, see [deployment and recovery](docs/DEPLOYMENT.md). The operator CLI is listed by `restreamer-core --help`. See the [Go migration guide](docs/MIGRATION.md), [GraphQL guide](docs/GRAPHQL.md), and [release readiness report](docs/PHASE_6_STATUS.md). The [browser regression report](docs/UI_REGRESSION.md) records the behavior of the unchanged Restreamer UI pins.
+For native and container candidates, backup and rollback, see [deployment and recovery](docs/DEPLOYMENT.md). The operator CLI is listed by `restreamer-core --help`. See the [Go migration guide](docs/MIGRATION.md), [GraphQL guide](docs/GRAPHQL.md), and [release readiness report](docs/PHASE_6_STATUS.md). Castvane’s own UI is the only UI covered by the stable support policy. The Core release has an independent backend acceptance checklist. The [browser regression report](docs/UI_REGRESSION.md) records historical Restreamer UI compatibility evidence.
 
 ## Licensing
 

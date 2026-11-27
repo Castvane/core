@@ -1,4 +1,4 @@
-# Restreamer UI browser regression
+# Historical Restreamer UI browser regression
 
 The harness builds the five unchanged [compatibility pins](BOOTSTRAP.md#pinned-compatibility-references) and drives their production bundles in Chromium against a disposable Castvane node. The browser runs on loopback. Captured diagnostics contain API methods, paths and statuses. They omit query strings, submitted values, tokens and response bodies.
 
@@ -22,4 +22,4 @@ Use `v1.0.0`, `v1.8.0`, `v1.14.0`, `upstream` or `owner` as the pin. The harness
 
 The upstream pins that signed in also requested the optional `restreamer-ui` metadata key. A fresh instance has no saved value and returned 404. The same instance still refreshed the session successfully.
 
-A Phase 6 rerun against the `0.2.0-rc.1` binary reproduced these outcomes for v1.8.0, v1.14.0, upstream HEAD and the owner pin. The v1.0.0 bundle still has the recorded Linux source-path blocker. Full dashboard, process control, media playback, settings and administration remain unverified. Castvane reports its own application version. Selecting a legacy version compatibility policy remains a release decision.
+A Phase 6 rerun against the `0.2.0-rc.1` binary reproduced these outcomes for v1.8.0, v1.14.0, upstream HEAD and the owner pin. The v1.0.0 bundle still has the recorded Linux source-path blocker. Full dashboard, process control, media playback, settings and administration remain unverified. Castvane reports its own application version. These results are historical compatibility evidence. Only Castvane’s own UI receives official support. Core retains its own version in discovery. Third-party UI version gates and fixture-specific failures are outside the stable Core acceptance gate.

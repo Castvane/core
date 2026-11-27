@@ -2,7 +2,7 @@
 
 ## Goals and non-goals
 
-- Preserve observable compatibility with existing Restreamer UIs, using the Go `vod` branch at `452e9429` as the current behavioral reference and older supported UI releases as regression targets.
+- Preserve the public v3 wire contracts using the Go `vod` branch at `452e9429` as the behavioral reference and pinned Restreamer UIs as historical regression fixtures. Official UI support covers Castvane’s own UI.
 - Retain the public `/api/v3` contract, including unversioned legacy routes (`/api`, `/api/login`, `/api/login/refresh`, `/ping`), GraphQL where clients use `/api/graph`, media mounts and optional Swagger access. Internal Rust architecture and storage formats may differ.
 - Treat public API versions separately from application releases. Reserve `/api/v4` for future breaking changes; keep v3 adapters operational. Do not require an old UI to change its base URL, tokens, or request format.
 - Independently implement internals from documented behavior; do not translate Go files. Review licensing before importing any reference artifacts. License independently authored Rust code under MIT; historical Go code retains its Apache 2.0 license.
@@ -10,7 +10,7 @@
 
 ## Compatibility discipline
 
-Phase 1 must inventory routes from `vod` and supported UI releases, recording method, path, query parameters, request/response field names, null versus omitted versus empty values, defaults, status codes, error envelopes, headers, auth requirements, feature flags, and side effects. Include GraphQL operations and media URL formats. Create independently authored sanitized fixtures from observed behavior, then compare Rust responses against a pinned reference instance in integration tests. Test older and current UIs in a browser without modification. Where versions disagree, preserve old behavior for old clients without breaking current clients; document any irreconcilable differences before release.
+Phase 1 must inventory routes from `vod` and the pinned reference UI releases, recording method, path, query parameters, request/response field names, null versus omitted versus empty values, defaults, status codes, error envelopes, headers, auth requirements, feature flags, and side effects. Include GraphQL operations and media URL formats. Create independently authored sanitized fixtures from observed behavior, then compare Rust responses against a pinned reference instance in integration tests. Test older and current UIs in a browser without modification. Where versions disagree, preserve old behavior for old clients without breaking current clients; document any irreconcilable differences before release.
 
 | Surface | Compatibility priority |
 | --- | --- |
@@ -22,7 +22,7 @@ Phase 1 must inventory routes from `vod` and supported UI releases, recording me
 | `/api/graph`, `/api/swagger/*`, `/metrics`, media mounts | GraphQL, docs, metrics and media delivery |
 | Separate cluster service `/v1/*` | Evaluate explicitly; preserve wire compatibility if mixed Go/Rust clusters are required; otherwise internal protocol can differ |
 
-Never advertise full v3 compatibility until the route inventory, reference tests, and supported UI workflows pass. Unsupported operations must fail clearly rather than return fake success. Old UI compatibility does not imply joining existing Go Raft clusters; mixed-node compatibility is a distinct decision requiring consensus/storage/protocol interoperability work.
+Claim v3 compatibility only for verified contracts. Preserve Castvane application version metadata in discovery, and use explicit API versions and capability information for first-party UI integration. Unsupported operations must fail clearly rather than return fake success. Old UI compatibility does not imply joining existing Go Raft clusters; mixed-node compatibility is a distinct decision requiring consensus/storage/protocol interoperability work.
 
 ## Architecture
 
@@ -58,7 +58,7 @@ The opt-in Raft implementation includes a rehearsed OpenRaft upgrade, targeted l
 
 ### 6 — Release and maintenance (candidate, exit criteria open)
 
-The candidate adds GraphQL, operator CLI, offline Go JSON migration, verified SQLite restore, and same-commit Linux AMD64, Linux ARM64 and Windows AMD64 release packaging. The [release status](docs/PHASE_6_STATUS.md) tracks the dependency policy, verification evidence and unfinished roadmap work. Stable publication requires the separate [acceptance checklist](docs/RELEASE_ACCEPTANCE.md).
+The candidate adds GraphQL, operator CLI, offline Go JSON migration, verified SQLite restore, and same-commit Linux AMD64, Linux ARM64 and Windows AMD64 release packaging. The [release status](docs/PHASE_6_STATUS.md) tracks the dependency policy, verification evidence and unfinished roadmap work. The first stable Core release requires completion and verification of the standalone and clustered backend roadmap. Core must expose the documented contracts needed for first-party UI development. Browser acceptance applies to the UI when it ships or is advertised. Stable Core publication requires the applicable [acceptance checklist](docs/RELEASE_ACCEPTANCE.md) and explicit owner approval.
 
 ## Quality gates
 

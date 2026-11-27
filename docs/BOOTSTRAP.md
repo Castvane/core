@@ -34,7 +34,7 @@ Public UI releases from [Restreamer UI](https://github.com/datarhei/restreamer-u
 | Upstream UI | default HEAD | `7164b38cb3a8655f7cd896e941093a1ca166b19b` | Current upstream development snapshot |
 | KingIronMan2011/restreamer-ui | main | `69feb33cedc8a93754cc0c8d7895221cfe16803f` | Owner's current UI snapshot |
 
-Phase 1 must inventory which API contracts these versions actually use. Expand the release regression matrix to all published v1 tags (v1.0.0–v1.14.0, including v1.5.1) before claiming support for that range. Older UI versions must not be modified to make tests pass. Build historical releases in isolated test environments, using their own locked dependencies; do not expose those reference installations publicly.
+Phase 1 must inventory which API contracts these versions actually use. The published v1 tags are historical compatibility references. Official UI support covers Castvane’s own UI. Older UI versions must not be modified to make tests pass. Build historical releases in isolated test environments, using their own locked dependencies; do not expose those reference installations publicly.
 
 Test discovery/login/refresh first; add process creation, playback, configuration and administration as each phase lands. If a historical UI cannot build or run, record the exact reason and use an independently authored API fixture until that UI can be exercised. That is not equivalent to a passing browser test.
 

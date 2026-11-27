@@ -1,6 +1,6 @@
 # Phase 6 — Production release
 
-The source version is `0.2.0-rc.1`. Phase 6 remains open. The candidate improves release operations and covers a functional standalone and clustered subset of the pinned Go reference. Public API v3 compatibility is tracked by contract tests and the [API inventory](API_COMPATIBILITY.md). No stable release has been approved.
+The source version is `0.2.0-rc.1`. Phase 6 remains open. The candidate improves release operations and covers a functional standalone and clustered subset of the pinned Go reference. Public API v3 compatibility is tracked by contract tests and the [API inventory](API_COMPATIBILITY.md). No stable release has been approved. The first stable Core release requires the outstanding backend roadmap and validation work. Castvane’s own UI is the only officially supported UI. Browser acceptance applies when the first-party UI ships or is advertised.
 
 | Gate | Status |
 | --- | --- |
@@ -67,7 +67,7 @@ The control API still runs beside third-party media executables. The process sup
 
 | Area | Landed | Remaining |
 | --- | --- | --- |
-| 0–1 Bootstrap, API and authentication | Native CI baseline, persistent config, local JWT, API fixtures | All advertised UI versions need to finish the real app workflows. The semantic-version gate and older fork failures are recorded in the [browser report](UI_REGRESSION.md). |
+| 0–1 Bootstrap, API and authentication | Native CI baseline, persistent config, local JWT, API fixtures | Finish the versioned API and capability contracts needed by the first-party UI. Legacy browser results remain historical evidence. |
 | 2 Process engine | Real FFmpeg supervision, progress, scheduling, recovery, persistence and scoped process settings | Full fields and limits for custom FFmpeg extensions and additional legacy shapes remain open. |
 | 3 Media and storage | Disk, memory, S3, MediaMTX-compatible RTMP/RTMPS/SRT, HLS, DASH, HTTP-FLV, sessions and aliases | Live playout requires extended FFmpeg. Some wire telemetry, provider and player acceptance remain open. |
 | 4 Operations and IAM | Local IAM and explicit deny, metrics, health, bounded events/audit, TLS and ACME | Auth0, some delegated administration forms, broader metrics and physical hardware tests remain open. |
@@ -83,9 +83,9 @@ Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do
 - [x] Build native candidates for Linux AMD64, Linux ARM64 and Windows AMD64 and Docker candidates for Linux AMD64 and ARM64. Verify their checksums and attestations.
 - [x] Exercise backup and independently authored migration fixtures, including a store created by the pinned Go executable.
 - [x] Exercise pinned UI discovery/login/refresh with existing bundles and retain exact blockers.
-- [ ] Complete the remaining route/schema compatibility checks and legacy UI version policy before claiming support across the advertised UI range.
+- [ ] Complete remaining route and schema checks and verify the API and capability contracts for first-party UI integration.
 - [ ] Complete Phase 5 membership administration, distributed certificate management and cross-node workflow parity.
-- [ ] Decide the Auth0 integration and extended FFmpeg playout support for the stable compatibility profile.
+- [ ] Close the roadmap gaps for Auth0 federation, extended FFmpeg live playout and telemetry, and encrypted SRT interoperability for the supported media combinations.
 - [ ] Validate the 24-hour and 72-hour workloads, real-provider S3, physical GPU and multi-host deployment on representative infrastructure.
 - [ ] Complete corresponding source review and preservation before publicly distributing an FFmpeg-bundled image.
 - [ ] Configure protected registry promotion and obtain explicit approval for a first stable release.

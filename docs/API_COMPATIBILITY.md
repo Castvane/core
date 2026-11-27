@@ -1,5 +1,7 @@
 # REST API compatibility matrix
 
+This matrix tracks public v3 wire compatibility independently of UI support. The pinned Restreamer UI traces are historical evidence. Castvane’s own UI is the supported UI.
+
 The behavioral reference is the Go `vod` commit [452e9429](https://github.com/KingIronMan2011/restreamer-core/tree/452e9429c1fd7e1a90d75ed12883171ecabd80eb). The route inventory comes from its HTTP registration and handlers. The Phase 1 fixtures were independently authored from source inspection and an isolated Go instance. UI pins are listed in [BOOTSTRAP.md](BOOTSTRAP.md).
 
 ## Discovery, authentication and configuration

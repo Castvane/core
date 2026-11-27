@@ -128,7 +128,13 @@ async fn discovery_local_login_refresh_and_policy() {
     assert_eq!(about["app"], "datarhei-core");
     assert_eq!(about["auths"], fixture["authentication_methods"]);
     assert!(about.get("id").is_none());
-    assert_eq!(about["capabilities"]["media"], true);
+    let capabilities = json!({
+        "schema_version":1,"product":"castvane","api_version":3,"api_prefix":"/api/v3",
+        "configuration":true,"configuration_write":true,"process_engine":true,"local_login":true,
+        "media":true,"clustering":false,"graphql":true,"playout":false,
+        "transports":{"rtmp":false,"rtmps":false,"srt":false,"http_flv":false}
+    });
+    assert_eq!(about["capabilities"], capabilities);
     assert_eq!(
         server.request("GET", "/api/v3/config", None, None).await,
         (StatusCode::FORBIDDEN, fixture["access_denied"].clone())
@@ -161,6 +167,7 @@ async fn discovery_local_login_refresh_and_policy() {
     assert_eq!(status, 200);
     assert_eq!(about["version"]["number"], env!("CARGO_PKG_VERSION"));
     assert!(about["id"].is_string());
+    assert_eq!(about["capabilities"], capabilities);
     assert_eq!(
         server
             .request("GET", "/api/v3/config", None, Some("invalid"))
@@ -192,6 +199,28 @@ async fn discovery_local_login_refresh_and_policy() {
         .await;
     assert_eq!(status, 200);
     assert_eq!(docs["openapi"], "3.1.0");
+    assert_eq!(
+        docs["paths"]["/api"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/Discovery"
+    );
+    for (schema, document) in [
+        ("DiscoveryCapabilities", &capabilities),
+        ("DiscoveryTransports", &capabilities["transports"]),
+    ] {
+        let schema = &docs["components"]["schemas"][schema];
+        let document = document.as_object().unwrap();
+        let required = schema["required"].as_array().unwrap();
+        assert_eq!(required.len(), document.len());
+        for (field, value) in document {
+            assert!(required.contains(&json!(field)));
+            if let Some(constant) = schema["properties"][field].get("const") {
+                assert_eq!(constant, value);
+            } else if field != "transports" {
+                assert_eq!(schema["properties"][field]["type"], "boolean");
+                assert!(value.is_boolean());
+            }
+        }
+    }
     assert_eq!(
         docs["paths"]["/api/v3/process/{id}/command"]["put"]["requestBody"]["content"]["application/json"]
             ["schema"]["$ref"],

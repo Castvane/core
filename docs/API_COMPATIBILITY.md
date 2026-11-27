@@ -23,19 +23,34 @@ General failures are objects with integer `code`, string `message` and a `detail
 
 ### Discovery and tokens
 
-The minimal response contains `app` (always `"datarhei-core"`), `auths` (array of strings), and `version.number` (major formatted as semver, currently `"0.0.0"`). `auths` includes `"localjwt"` when local credentials exist and is otherwise empty. The full response adds these fields.
+The minimal response contains `app` (always `"datarhei-core"`), `auths` (array of strings), and `version.number` (application major formatted as `major.0.0`). `auths` includes `"localjwt"` when local credentials exist and is otherwise empty. The full response adds these fields.
 
 | Field | Type and presence |
 | --- | --- |
 | `id`, `name` | String. Omitted in minimal discovery |
 | `created_at` | RFC 3339 string for service startup. Omitted in minimal discovery |
 | `uptime_seconds` | Nonnegative integer since startup. Omitted in minimal discovery |
-| `version.number` | Application semver, currently `0.1.0`. Independent of v3 |
+| `version.number` | Application semver. Independent of v3 |
 | `version.repository_commit`, `repository_branch`, `build_date`, `arch`, `compiler` | Build strings, omitted in minimal discovery. Build date is empty and commit is empty when unavailable |
 | `resources` | Object, omitted in minimal discovery. Boolean `is_throttling`, numeric `ncpu`, `cpu_used`, `cpu_limit`, `cpu_core`, `memory_used_bytes`, `memory_limit_bytes`, `memory_total_bytes`, `memory_core_bytes`, array `gpu`. Castvane populates CPU and memory data when available. For device inventory and optional counters use `GET /api/v3/resources` |
-| `capabilities` | Rust extension, present in both forms. Integer `api_version` (3), booleans `configuration`, `configuration_write`, `process_engine`, `local_login`, `media`, `clustering`. The last is false |
+| `capabilities` | Versioned Castvane extension, present in both forms. See the contract below |
 
 HS256 JWTs carry string `iss` (`datarhei-core`), `sub` (local account username), `usefor` (`access` or `refresh`), and `jti` (UUID). Integer `iat` and `exp` use Unix seconds. Integer `exi` is lifetime in seconds, 600 or 86,400 by default. Both lifetimes are configurable. Rust adds a string `generation` claim for credential revocation. Existing installations must log in again when moving between Go and Rust. The UI caches and reuses the same refresh token until it expires.
+
+### Castvane UI discovery contract
+
+Start with `GET /api`. Check `capabilities.product == "castvane"`, `capabilities.schema_version == 1`, and `capabilities.api_version == 3`. Use `capabilities.api_prefix` for versioned REST calls and `auths` to select a login flow. An older response without this extension has no Castvane discovery contract. The legacy `app` value stays `datarhei-core` and the application version is independent of the discovery schema and REST API versions.
+
+| Capability | Meaning in schema 1 |
+| --- | --- |
+| `configuration`, `process_engine`, `media`, `graphql` | The node exposes the corresponding API surface. |
+| `configuration_write` | The API is configured to accept writes. Caller permissions still apply. |
+| `local_login` | A local credential is provisioned. |
+| `clustering` | This node is started in cluster mode. |
+| `playout` | Live playout controls are available. Currently false. |
+| `transports.rtmp`, `transports.rtmps`, `transports.srt`, `transports.http_flv` | The corresponding transport was initialized on the node. These flags describe availability, not health, credentials, or encrypted playback support. |
+
+Use the presence of `id` to distinguish full from minimal discovery. Check `/readyz` and the authenticated diagnostics for current health. Ignore unknown fields within schema 1 so future additive features can appear without breaking older clients. The [OpenAPI discovery schema](../src/api/openapi.rs) describes the same response.
 
 ### Configuration schema
 
@@ -73,7 +88,7 @@ The first admin/dashboard calls beyond discovery and auth are configuration, ski
 
 Run the unchanged pinned fixtures with the [browser harness](UI_REGRESSION.md).
 
-The process, media and operations rows are available with the limits recorded in [Phase 2](PHASE_2_STATUS.md), [Phase 3](PHASE_3_STATUS.md) and [Phase 4](PHASE_4_STATUS.md). Cluster and GraphQL rows are planned. Paths in this table are relative to `/api/v3` unless the row specifies another base.
+The process, media and operations rows are available with the limits recorded in [Phase 2](PHASE_2_STATUS.md), [Phase 3](PHASE_3_STATUS.md) and [Phase 4](PHASE_4_STATUS.md). Cluster and GraphQL coverage is described in the sections below. Paths in this table are relative to `/api/v3` unless the row specifies another base.
 
 | Phase | Method and path groups | Reference contract and conditions |
 | --- | --- | --- |

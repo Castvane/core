@@ -91,13 +91,27 @@ pub struct Resources {
 
 #[derive(Serialize)]
 pub struct Capabilities {
+    pub schema_version: u8,
+    pub product: &'static str,
     pub api_version: u8,
+    pub api_prefix: &'static str,
     pub configuration: bool,
     pub configuration_write: bool,
     pub process_engine: bool,
     pub local_login: bool,
     pub media: bool,
     pub clustering: bool,
+    pub graphql: bool,
+    pub playout: bool,
+    pub transports: Transports,
+}
+
+#[derive(Default, Serialize)]
+pub struct Transports {
+    pub rtmp: bool,
+    pub rtmps: bool,
+    pub srt: bool,
+    pub http_flv: bool,
 }
 
 #[derive(Serialize)]

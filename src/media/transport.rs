@@ -340,11 +340,16 @@ impl Transport {
     }
 
     pub fn enabled(&self, protocol: &str) -> bool {
-        if protocol == "rtmp" {
-            self.rtmp.is_some()
-        } else {
-            self.srt.is_some()
+        match protocol {
+            "rtmp" => self.rtmp.is_some(),
+            "rtmps" => self.rtmp_secure,
+            "srt" => self.srt.is_some(),
+            _ => false,
         }
+    }
+
+    pub fn plain_rtmp_enabled(&self) -> bool {
+        self.rtmp.is_some_and(|(_, tls)| !tls)
     }
 
     pub fn flv_mount(&self) -> Option<&str> {

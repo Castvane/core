@@ -524,6 +524,16 @@ async fn discovery(
     } else {
         None
     };
+    let transports =
+        app.media
+            .transport
+            .as_ref()
+            .map_or_else(dto::Transports::default, |transport| dto::Transports {
+                rtmp: transport.plain_rtmp_enabled(),
+                rtmps: transport.enabled("rtmps"),
+                srt: transport.enabled("srt"),
+                http_flv: transport.flv_mount().is_some(),
+            });
     Ok(Json(dto::Discovery {
         app: "datarhei-core",
         auths,
@@ -537,13 +547,19 @@ async fn discovery(
         },
         node,
         capabilities: dto::Capabilities {
+            schema_version: 1,
+            product: "castvane",
             api_version: 3,
+            api_prefix: LEGACY_API_PREFIX,
             configuration: true,
             configuration_write: !settings.api.read_only,
             process_engine: true,
             local_login: !auths.is_empty(),
             media: true,
             clustering: app.cluster.is_some(),
+            graphql: true,
+            playout: false,
+            transports,
         },
     }))
 }

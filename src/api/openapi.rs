@@ -32,7 +32,7 @@ pub async fn document() -> Json<Value> {
         "info": {"title":"Castvane Core", "version":env!("CARGO_PKG_VERSION")},
         "paths": {
             "/ping":{"get":{"summary":"Check liveness","responses":{"200":{"description":"Alive","content":{"text/plain":{"schema":{"const":"pong"}}}}}}},
-            "/api":{"get":{"summary":"Discover node and available features","security":[{},{"bearer":[]}],"responses":{"200":{"description":"Discovery document","content":{"application/json":{"schema":{"type":"object","required":["app","auths","version","capabilities"]}}}},"401":error(),"403":error()}}},
+            "/api":{"get":{"summary":"Discover node and available features","security":[{},{"bearer":[]}],"responses":{"200":{"description":"Discovery document","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Discovery"}}}},"401":error(),"403":error()}}},
             "/api/login":{"post":{"summary":"Authenticate a local identity","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["username","password"],"properties":{"username":{"type":"string"},"password":{"type":"string","writeOnly":true}}}}}},"responses":{"200":tokens(true),"403":error(),"429":error()}}},
             "/api/login/refresh":{"get":{"summary":"Issue an access token using a refresh token","security":[{"bearer":[]}],"responses":{"200":tokens(false),"401":error(),"403":error()}}},
             "/api/v3/config":{
@@ -46,12 +46,64 @@ pub async fn document() -> Json<Value> {
             "schemas":{"Error":{"type":"object","required":["code","message","details"],"properties":{"code":{"type":"integer"},"message":{"type":"string"},"details":{"type":"array","items":{"type":"string"}}}}}
         }
     });
+    discovery_schemas(&mut spec);
     process_paths(&mut spec);
     media_paths(&mut spec);
     operations_paths(&mut spec);
     cluster_paths(&mut spec);
     documentation_paths(&mut spec);
     Json(spec)
+}
+
+fn discovery_schemas(spec: &mut Value) {
+    let schemas = &mut spec["components"]["schemas"];
+    schemas["Discovery"] = json!({
+        "type":"object",
+        "required":["app","auths","version","capabilities"],
+        "properties":{
+            "app":{"const":"datarhei-core"},
+            "auths":{"type":"array","items":{"type":"string"}},
+            "version":{"type":"object","required":["number"],"properties":{
+                "number":{"type":"string"},
+                "repository_commit":{"type":"string"},"repository_branch":{"type":"string"},
+                "build_date":{"type":"string"},"compiler":{"type":"string"},"arch":{"type":"string"}
+            }},
+            "id":{"type":"string"},"name":{"type":"string"},
+            "created_at":{"type":"string","format":"date-time"},
+            "uptime_seconds":{"type":"integer","minimum":0},"resources":{"type":"object"},
+            "capabilities":{"$ref":"#/components/schemas/DiscoveryCapabilities"}
+        }
+    });
+    let mut capabilities = json!({
+        "type":"object",
+        "description":"Node feature availability. Management requests still require the relevant authorization. Check /readyz for runtime readiness.",
+        "properties":{
+            "schema_version":{"const":1},"product":{"const":"castvane"},
+            "api_version":{"const":3},"api_prefix":{"const":crate::LEGACY_API_PREFIX},
+            "configuration":{"type":"boolean"},"configuration_write":{"type":"boolean"},
+            "process_engine":{"type":"boolean"},"local_login":{"type":"boolean"},
+            "media":{"type":"boolean"},"clustering":{"type":"boolean"},
+            "graphql":{"type":"boolean"},"playout":{"type":"boolean"},
+            "transports":{"$ref":"#/components/schemas/DiscoveryTransports"}
+        }
+    });
+    let mut transports = json!({
+        "type":"object","properties":{
+            "rtmp":{"type":"boolean"},"rtmps":{"type":"boolean"},
+            "srt":{"type":"boolean"},"http_flv":{"type":"boolean"}
+        }
+    });
+    for schema in [&mut capabilities, &mut transports] {
+        schema["required"] = json!(
+            schema["properties"]
+                .as_object()
+                .into_iter()
+                .flat_map(|p| p.keys())
+                .collect::<Vec<_>>()
+        );
+    }
+    schemas["DiscoveryCapabilities"] = capabilities;
+    schemas["DiscoveryTransports"] = transports;
 }
 
 fn documentation_paths(spec: &mut Value) {

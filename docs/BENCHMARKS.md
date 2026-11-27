@@ -37,6 +37,20 @@ The locked release build at `22122f4` and the same pinned Go executable ran the 
 
 Startup and request timings vary between runs. These measurements cover synthetic loopback management traffic.
 
+## Discovery contract and relocation preview rerun
+
+The locked release build at `c87bf75` and the pinned Go `452e9429` executable ran on the same Linux AMD64 host with three assigned CPUs. Three loopback trials used eight clients and two seconds per endpoint per trial.
+
+| Measurement | Castvane median (range) | Go median (range) |
+| --- | --- | --- |
+| Launch to successful `/ping` | 82.95 ms (54.29–155.93) | 473.56 ms (473.21–624.92) |
+| Idle RSS | 20,556 KiB (20,552–20,940) | 31,484 KiB (31,276–31,748) |
+| `/ping` throughput | 10,924 requests/s (10,590–11,263) | 9,166 requests/s (8,791–10,262) |
+| `/api` discovery throughput | 7,870 requests/s (7,618–8,237) | 9,352 requests/s (9,039–10,316) |
+| Binary bytes | 44,965,072 | 58,547,705 |
+
+These results cover management traffic on a single host. Discovery payloads vary because Castvane includes its UI capability contract. No FFmpeg transcoding comparisons were measured.
+
 ## Candidate-only workloads
 
 The release binary completed the [60-second recovery and four-node cluster measurements](PHASE_6_STATUS.md#automated-verification) with FFmpeg 7.1.5. Cluster times include lease and scheduling settings. No Go cluster workload was run.

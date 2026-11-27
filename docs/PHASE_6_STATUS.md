@@ -72,7 +72,7 @@ The control API still runs beside third-party media executables. The process sup
 | 3 Media and storage | Disk, memory, S3, MediaMTX-compatible RTMP/RTMPS/SRT, HLS, DASH, HTTP-FLV, sessions and aliases | Live playout requires extended FFmpeg. Some wire telemetry, provider and player acceptance remain open. |
 | 4 Operations and IAM | Local IAM and explicit deny, metrics, health, bounded events/audit, TLS and ACME | Auth0, some delegated administration forms, broader metrics and physical hardware tests remain open. |
 | 5 Clustering | Raft and mTLS, quorum-fenced scheduling, remote diagnostics, leases, IAM, zones, aliases and KV | Complete membership lifecycle, live identity/CA rotation, distributed TLS, richer placement, cross-node references and legacy cluster route parity remain open. See [Phase 5](PHASE_5_STATUS.md#open-phase-5-work). |
-| 6 Distribution | CLI, candidate recipes, migration, backups, release policy and packaging | Complete API/OpenAPI per-operation parity, broad migration acceptance, remaining cluster recovery procedures, sustained testing, physical GPU profiles, protected Docker Hub setup and stable publication. |
+| 6 Distribution | CLI, candidate recipes, migration, backups, release policy and packaging | Complete API/OpenAPI per-operation parity, broad migration acceptance, remaining cluster recovery procedures, sustained testing, physical GPU profiles, live Docker Hub promotion verification and stable publication. |
 
 Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do not publish a stable release before the manual gates and unresolved implementation items have been reviewed.
 
@@ -87,4 +87,4 @@ Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do
 - [ ] Complete Phase 5 membership administration, distributed certificate management and cross-node workflow parity.
 - [ ] Close the roadmap gaps for Auth0 federation, extended FFmpeg live playout and telemetry, and encrypted SRT interoperability with the supported Linux production FFmpeg build. Native Windows encrypted SRT playback is unsupported and outside release acceptance.
 - [ ] Validate the 24-hour and 72-hour workloads, real-provider S3, physical GPU and multi-host deployment on representative infrastructure.
-- [ ] Configure protected registry promotion and obtain explicit approval for a first stable release.
+- [ ] Verify protected registry promotion and obtain explicit approval for a first stable release.

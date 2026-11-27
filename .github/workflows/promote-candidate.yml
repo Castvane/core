@@ -15,7 +15,7 @@ on:
         type: boolean
         default: false
       publish_dockerhub:
-        description: Push the Core-only multi-architecture manifest to the configured Docker Hub repository
+        description: Push the Core-only multi-architecture manifest to Docker Hub at castvane/core
         type: boolean
         default: false
 
@@ -83,15 +83,13 @@ jobs:
       - name: Assemble the exact-version Docker Hub manifest
         if: inputs.publish_dockerhub
         env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || vars.DOCKERHUB_USERNAME }}
-          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
-          [[ "$DOCKERHUB_REPOSITORY" =~ ^[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$ ]]
           [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]
           printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
-          bash scripts/publish-candidate-image.sh "docker.io/$DOCKERHUB_REPOSITORY" "$VERSION" "$CASTVANE_RELEASE_REVISION" > release/dockerhub-manifest.txt
+          bash scripts/publish-candidate-image.sh docker.io/castvane/core "$VERSION" "$CASTVANE_RELEASE_REVISION" > release/dockerhub-manifest.txt
       - name: Prepare an unpublished prerelease draft
         run: |
           set -euo pipefail

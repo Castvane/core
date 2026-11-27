@@ -693,6 +693,8 @@ async fn process_state(
 struct Relocation {
     id: String,
     node: Option<u64>,
+    #[serde(default)]
+    dry_run: bool,
 }
 
 async fn relocate(
@@ -708,9 +710,26 @@ async fn relocate(
     {
         return Err(Failure::Invalid.into());
     }
-    let (revision, mut job) = find_job(cluster, &relocation.id).await?;
+    let state = cluster.committed().await?;
+    let record = state
+        .get(Collection::Process, &relocation.id)
+        .ok_or(Failure::Missing)?;
+    let mut job: Job = serde_json::from_value(record.value.clone())?;
     job.requirements.node = relocation.node;
-    let _ = save_job(cluster, relocation.id, job, revision).await?;
+    if relocation.dry_run {
+        let eligible_nodes = cluster
+            .relocation_candidates(&state, &relocation.id, &job)
+            .await;
+        return Ok(Json(json!({
+            "id":relocation.id,
+            "requested_node":relocation.node,
+            "current_node":job.assignment.map(|assignment|assignment.node),
+            "desired":job.desired,
+            "revision":record.revision,
+            "eligible_nodes":eligible_nodes
+        })));
+    }
+    let _ = save_job(cluster, relocation.id, job, record.revision).await?;
     Ok(Json(json!("OK")))
 }
 

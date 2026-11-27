@@ -749,6 +749,26 @@ fn cluster_paths(spec: &mut Value) {
     leave["responses"]["405"] = error();
     leave["responses"]["413"] = error();
 
+    let relocation = &mut spec["paths"]["/api/v3/cluster/reallocation"]["put"];
+    relocation["description"] = json!(
+        "Change or preview process placement on the leader. A preview uses recent telemetry and committed reservations, and does not write or reserve resources."
+    );
+    relocation["requestBody"] = json!({"required":true,"content":{"application/json":{
+        "schema":{"type":"object","required":["id"],"properties":{
+            "id":{"type":"string"},"node":{"type":["integer","null"],"minimum":1},
+            "dry_run":{"type":"boolean","default":false}
+        }},"example":{"id":"video","node":2,"dry_run":true}
+    }}});
+    relocation["responses"]["200"] = json!({"description":"Placement saved or preview returned",
+        "content":{"application/json":{"schema":{"oneOf":[{"const":"OK"},{
+            "type":"object","required":["id","requested_node","current_node","desired","revision","eligible_nodes"],
+            "properties":{"id":{"type":"string"},"requested_node":{"type":["integer","null"]},
+                "current_node":{"type":["integer","null"]},"desired":{"type":"boolean"},"revision":{"type":"integer"},
+                "eligible_nodes":{"type":"array","items":{"type":"integer"}}}
+        }]}}}
+    });
+    relocation["responses"]["405"] = error();
+
     let node_files = &mut spec["paths"]["/api/v3/cluster/node/{id}/files"]["get"];
     node_files["description"] = json!(
         "List paths by mounted storage on a reachable member. Requires an administrator on the leader with quorum."

@@ -390,6 +390,19 @@ def exercise(binary, root, upgrade_from=None):
         assert probe["streams"][0]["type"] == "video"
         print(f"remote deployment {time.monotonic() - started:.3f}s", flush=True)
         started = time.monotonic()
+        preview = leader_node.call("PUT", "/reallocation", {"id": "video", "node": 2, "dry_run": True})
+        assert preview["id"] == "video" and preview["desired"] is True
+        assert preview["current_node"] == 4 and preview["requested_node"] == 2 and preview["eligible_nodes"] == [2]
+        assert leader_node.call("GET", "/process/video")["assignment"]["epoch"] == original["assignment"]["epoch"]
+        automatically = leader_node.call("PUT", "/reallocation", {"id": "video", "node": None, "dry_run": True})
+        assert automatically["revision"] == preview["revision"] and automatically["requested_node"] is None
+        assert 4 in automatically["eligible_nodes"] and 2 in automatically["eligible_nodes"]
+        assert 1 not in automatically["eligible_nodes"]
+        assert leader_node.call("PUT", "/reallocation", {
+            "id": "video", "node": 1, "dry_run": True,
+        })["eligible_nodes"] == []
+        leader_node.call("PUT", "/reallocation", {"id": "video", "node": 9999, "dry_run": True}, expected=400)
+        leader_node.call("PUT", "/reallocation", {"id": "absent", "node": 2, "dry_run": True}, expected=404)
         leader_node.call("PUT", "/reallocation", {"id": "video", "node": 2})
         moved = eventually(lambda: media_running(leader_node, 2), "explicit relocation did not converge")
         assert moved["assignment"]["epoch"] > original["assignment"]["epoch"]

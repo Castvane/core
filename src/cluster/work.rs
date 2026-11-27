@@ -197,8 +197,8 @@ impl Cluster {
                 .as_ref()
                 .map_or(u64::MAX, |lease| lease.expires_ms)
         });
-        for (id, job) in work.into_iter().take(256) {
-            let Some(record) = state.get(Collection::Process, &id) else {
+        for (key, job) in work.into_iter().take(256) {
+            let Some(record) = state.get(Collection::Process, &key) else {
                 continue;
             };
             let observation = |id| {
@@ -226,17 +226,7 @@ impl Cluster {
                     .keys()
                     .filter_map(|id| {
                         let obs = observation(*id)?;
-                        let mut free = obs.capacity.clone();
-                        for (key, other) in jobs(&state) {
-                            if key != id_string(&job)
-                                && let Some(assigned) = other.assignment
-                                && assigned.node == *id
-                                && free.reserve(&assigned.resources).is_none()
-                            {
-                                return None;
-                            }
-                        }
-                        free.reserve(&job.requirements.capacity)?;
+                        let free = remaining_capacity(&state, &key, *id, &job, obs)?;
                         Some((*id, obs, free.processes))
                     })
                     .max_by_key(|(id, _, free)| {
@@ -262,7 +252,7 @@ impl Cluster {
             };
             let result = self
                 .write(Action::Assign {
-                    key: id,
+                    key,
                     revision: record.revision,
                     node,
                     expires_ms: now.saturating_add(self.lease_ms),
@@ -311,16 +301,7 @@ impl Cluster {
                 {
                     return false;
                 }
-                let mut free = observed.capacity.clone();
-                for (_, other) in jobs(state) {
-                    if let Some(lease) = other.assignment
-                        && lease.node == id
-                        && free.reserve(&lease.resources).is_none()
-                    {
-                        return false;
-                    }
-                }
-                free.reserve(&job.requirements.capacity).is_some()
+                remaining_capacity(state, &key, id, &job, observed).is_some()
             });
             if let Some((&destination, _)) = destination
                 && let Some(record) = state.get(Collection::Process, &key)
@@ -339,6 +320,40 @@ impl Cluster {
         }
     }
 
+    pub(crate) async fn relocation_candidates(
+        &self,
+        state: &Data,
+        key: &str,
+        job: &Job,
+    ) -> Vec<u64> {
+        let members = self
+            .raft
+            .metrics()
+            .borrow_watched()
+            .membership_config
+            .nodes()
+            .filter_map(|(id, _)| {
+                read_node(state, *id)
+                    .filter(|node| eligible(*id, node, &job.requirements))
+                    .map(|_| *id)
+            })
+            .collect::<Vec<_>>();
+        let mut eligible: Vec<_> = stream::iter(members)
+            .map(|id| async move {
+                let observed = self.report(id).await?.observation;
+                if !supplies(&observed, &job.requirements) {
+                    return None;
+                }
+                remaining_capacity(state, key, id, job, &observed).map(|_| id)
+            })
+            .buffer_unordered(8)
+            .filter_map(|id| async move { id })
+            .collect()
+            .await;
+        eligible.sort_unstable();
+        eligible
+    }
+
     pub async fn report(&self, id: u64) -> Option<Telemetry> {
         let report = if self.id == id {
             self.telemetry.read().await.clone()
@@ -349,8 +364,24 @@ impl Cluster {
     }
 }
 
-fn id_string(job: &Job) -> &str {
-    job.config["id"].as_str().unwrap_or_default()
+fn remaining_capacity(
+    state: &Data,
+    key: &str,
+    node: u64,
+    job: &Job,
+    observed: &Observation,
+) -> Option<Capacity> {
+    let mut free = observed.capacity.clone();
+    for (other_key, other) in jobs(state) {
+        if other_key != key
+            && let Some(assigned) = other.assignment
+            && assigned.node == node
+        {
+            free.reserve(&assigned.resources)?;
+        }
+    }
+    free.reserve(&job.requirements.capacity)?;
+    Some(free)
 }
 
 fn supplies(observed: &Observation, requirements: &Requirements) -> bool {

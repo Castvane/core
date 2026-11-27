@@ -28,7 +28,7 @@ Cluster paths are under /api/v3/cluster. Administrator authorization and the exi
 | --- | --- |
 | Topology | GET root, health, snapshot indices, deployments, node list, node detail, live node build metadata, node process list and node state |
 | Membership | POST preprovisioned node enrollment, PUT replacement voter set, targeted leadership transfer, node drain and disable, and removal of drained voters and learners |
-| Process | GET, POST, PUT and DELETE definitions; configuration, sampled state, reports, probe, playback origin and metadata; command and relocation PUT |
+| Process | GET, POST, PUT and DELETE definitions; configuration, sampled state, reports, probe, playback origin and metadata; command, relocation, and read-only placement preview via relocation PUT |
 | Filesystem | Member file inventory, aggregate storage listing, node mount listing, ranged GET, HEAD, PUT up to 1 MiB, DELETE, and per-node copy and move |
 | IAM | List, create, update and delete managed identities; list and replace policies |
 | Zones and aliases | Zone CRUD and ordered alias/rule operations |
@@ -38,18 +38,18 @@ For configuration, backup, node roles and supervision assumptions see [cluster i
 
 ## Verification and acceptance
 
-The disposable four-node fixture uses three voters, a learner, isolated TLS identities and generated FFmpeg input. It verifies elections, targeted leadership transfer, learner enrollment after log compaction, rejection without a client certificate, KV compare-and-set, lock fencing, distributed IAM authorization and revocation, alias propagation, remote filesystem operations, FFmpeg deployment, relocation, abrupt worker loss, quorum loss, restored voter state, and a bidirectional TCP partition isolating the leader. Unit tests exercise overcommitment and old ownership epochs. Native CI runs the fixture on AMD64 and ARM64.
+The disposable four-node fixture uses three voters, a learner, isolated TLS identities and generated FFmpeg input. It verifies elections, targeted leadership transfer, learner enrollment after log compaction, rejection without a client certificate, KV compare-and-set, lock fencing, distributed IAM authorization and revocation, alias propagation, remote filesystem operations, FFmpeg deployment, relocation previews without writes, relocation, abrupt worker loss, quorum loss, restored voter state, and a bidirectional TCP partition isolating the leader. Unit tests exercise overcommitment and old ownership epochs. Native CI runs the fixture on AMD64 and ARM64.
 
 One Linux AMD64 debug run measured 72 durable writes plus CAS and locks in 0.78 seconds, learner enrollment in 19 ms, remote deployment in 2.20 seconds, relocation in 11.82 seconds and recovery after worker loss in 11.18 seconds. The fixture uses eight-second leases and loopback networking. These are measurements for a small isolated cluster. A subsequent partition fixture accepted a write from the majority after 4.02 seconds and rejected a write from the isolated leader.
 
 RustSec reported no vulnerabilities and the existing unmaintained chrono and humantime advisories. OpenRaft 0.10.1 and its compatibility adapter are MIT OR Apache-2.0. A rolling upgrade from the prior 0.9.26-based Castvane build passed in the four-node fixture without resetting SQLite or changing the internal v1 RPC contract.
 
-Manual UI acceptance remains open. Test each pinned UI against a disposable cluster with control and media workers. Check the version gate, node list, job assignment, observed progress, relocation, policy administration and aliases. Record response and screen differences with credentials removed.
+First-party UI acceptance remains open for the Castvane UI. With a disposable cluster containing control and media workers, check the node list, job assignment, observed progress, relocation, policy administration, and aliases. Record the UI and Core revisions and remove credentials from collected traces.
 
 ## Open Phase 5 work
 
 - Automatic leave forwarding and leadership handoff for a self-removing leader, time-limited enrollment and live identity rotation.
-- Memory and GPU pressure rebalancing, pipeline affinity and failure-domain separation, relocation cancellation and dry-run analysis, and per-device encoder and decoder session limits.
+- Memory and GPU pressure rebalancing, pipeline affinity and failure-domain separation, relocation cancellation, and per-device encoder and decoder session limits.
 - Distributed certificate issuance and renewal leadership. Cluster mode uses externally coordinated public TLS certificates and declines built-in automatic ACME.
 - Legacy playback redirects, cross-node process references and automatic zone routing.
 - Full Go cluster API parity, including original snapshot downloads and shapes, distributed event subscriptions, and additional legacy node and database routes. The Go /v1/* wire protocol and mixed Go/Rust Raft membership are outside scope.

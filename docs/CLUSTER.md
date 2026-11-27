@@ -51,6 +51,16 @@ To remove a member, set `draining: true` on its node state route and wait until 
 
 Use `PUT /api/v3/cluster/node/{id}/fs` to copy or move between mounts on that member. For example, send `{"operation":"copy","source":"disk:/video.ts","target":"mem:/video.ts"}` to the leader. The worker streams the data between its storage backends and applies the optional `bandwidth_limit_kbit` and the 10-second RPC deadline. A move writes the target, then checks the source version before deleting it. Core serializes that check and deletion with its disk and memory writes. External disk writers and S3 operations can still race source deletion. A conflict or timeout can leave both paths present. Inspect both paths before retrying.
 
+### Preview process relocation
+
+Send `PUT /api/v3/cluster/reallocation` to the current leader with the process ID, a numeric node ID (or `null` to consider automatic placement), and `dry_run: true`.
+
+```json
+{"id":"video","node":2,"dry_run":true}
+```
+
+The preview returns `current_node`, `requested_node`, `desired`, the process `revision`, and a sorted list of `eligible_nodes`. It checks reachable members using current placement requirements, fresh telemetry and committed capacity reservations. An empty list means the preview found no eligible target. A preview makes no placement change and reserves no capacity. The target must still qualify when the scheduler acts. To request relocation, submit the same ID and node with `dry_run` omitted or false.
+
 ## Availability and recovery
 
 Writes require Raft quorum. After a write timeout, read the committed revision before retrying. KV supports expected revisions. Process updates reject conflicting revisions.

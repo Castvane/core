@@ -14,8 +14,8 @@ The source version is `0.2.0-rc.1`. Phase 6 remains open. The candidate improves
 - Authenticated GraphQL for discovery, ping, processes, reports, probe, local metrics and logs, with bounded execution and per-field authorization. The Go JSON transport returned 400 during isolated verification. [GraphQL guide](GRAPHQL.md)
 - A versioned offline migration command imports supported Go JSON configurations, process definitions and metadata, zone and alias exports, and dormant users with compatible policies. Unsupported configuration areas are listed in the import guide. [Migration guide](MIGRATION.md)
 - Consistent SQLite backups include application state and the local member's Raft durable state. Restoration checks SHA-256, SQLite integrity, foreign keys and supported SQL migration history, and refuses existing destinations. Binary metadata includes the source commit. [Deployment and recovery](DEPLOYMENT.md)
-- Build and candidate packaging cover Linux AMD64 and ARM64 with glibc. The Docker build can use Ubuntu's FFmpeg and records configure flags and exact package/source versions. The export uses operator-supplied tools while FFmpeg source distribution and publication remain pending. The [release guide](RELEASING.md) describes policy, checksums, provenance and the independently versioned contracts.
-- The dependency policy checks both native Linux graphs. The full lockfile RustSec review found zero known vulnerabilities and two unmaintained dependency notices. Both remain transitive through the S3 SDK. See the [dependency policy](../deny.toml) and [third-party notices](../THIRD_PARTY_NOTICES.md).
+- Native candidate packaging targets Linux AMD64 and ARM64 with glibc and Windows AMD64 with MSVC. The Docker build can use Ubuntu's FFmpeg and records configure flags and exact package/source versions. The export uses operator-supplied tools while FFmpeg source distribution and publication remain pending. The [release guide](RELEASING.md) describes policy, checksums, provenance and the independently versioned contracts.
+- The dependency policy checks the two Linux targets and Windows AMD64. The full lockfile RustSec review found zero known vulnerabilities and two unmaintained dependency notices. Both remain transitive through the S3 SDK. See the [dependency policy](../deny.toml) and [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 ## Automated verification
 
@@ -38,6 +38,14 @@ All local media inputs were generated in disposable directories. The environment
 The four-node loopback upgrade fixture measured 72 durable writes plus CAS and locks in 1.448 s, enrollment in 0.019 s, FFmpeg deployment in 2.999 s, relocation in 10.346 s and worker failover in 12.393 s. It committed through the majority after 4.024 s, including the rejected isolated write. These timings use eight-second fixture leases and include local scheduling effects. No direct Go cluster speed comparison was made.
 
 A separate three-run management benchmark measured around 23% higher Castvane liveness throughput and around 15% higher Go discovery throughput. The [benchmark report](BENCHMARKS.md) includes absolute times, per-run ranges, environment, repeat commands and test profile details.
+
+### Dependency and compatibility follow-up
+
+The dependency refresh resolved all 47 direct Rust dependencies to their latest stable versions available at the time of the update. Transitive versions follow Cargo's compatibility constraints. RustSec reported zero known vulnerabilities and two unmaintained transitive packages, `chrono` and `humantime`, through the S3 SDK. Advisory, license, dependency and source policy checks passed. [Dependency CI](https://github.com/Castvane/core/actions/runs/45961434868)
+
+The local Linux AMD64 follow-up passed formatting, Clippy, 48 standard Rust tests, the locked release build, the smoke test, the 75 pinned-Go standalone contract comparisons and the pinned-Go migration rehearsal. The four-node loopback upgrade from `d95faab` crossed OpenRaft 0.9 to 0.10 with pre-existing snapshots, committed writes during the rollout, targeted leadership transfer, member and storage inventory, worker failover and restored voter state.
+
+The locked `22122f4` release binary handled 421,086 requests with 16 clients during a 120-second isolated recovery run. Core peak RSS went from 42,180 to 47,044 KiB. FFmpeg crash cleanup, process restart and online backup restoration passed. See the [rerun benchmark](BENCHMARKS.md#dependency-upgrade-rerun) for the management measurements on the same build.
 
 ## Candidate artifacts
 
@@ -74,7 +82,7 @@ Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do
 - [x] Exercise backup and independently authored migration fixtures, including a store created by the pinned Go executable.
 - [x] Exercise pinned UI discovery/login/refresh with existing bundles and retain exact blockers.
 - [ ] Complete the remaining route/schema compatibility checks and legacy UI version policy before claiming support across the advertised UI range.
-- [ ] Complete Phase 5 membership and leadership administration, distributed certificate management and cross-node workflow parity.
+- [ ] Complete Phase 5 membership administration, distributed certificate management and cross-node workflow parity.
 - [ ] Decide the Auth0 integration and extended FFmpeg playout support for the stable compatibility profile.
 - [ ] Validate the 24-hour and 72-hour workloads, real-provider S3, physical GPU and multi-host deployment on representative infrastructure.
 - [ ] Complete corresponding source review and preservation before publicly distributing an FFmpeg-bundled image.

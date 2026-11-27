@@ -54,11 +54,11 @@ The standalone operations layer uses SQLite for managed identities, policy assig
 
 Provide standalone and clustered modes, with stable node identity, enrollment/authentication, heartbeat and resource inventory. Replicate durable desired state with a reviewed consensus library; distinguish quorum decisions from ephemeral telemetry. Implement reconciliation, reservations, affinity, zones, relocation, rebalancing, failover and distributed locks/leases with fencing. Test partitions, leader elections, duplicate commands, node removal, recovery, snapshots and rolling upgrades. Expose v3 cluster APIs; decide mixed Go/Rust cluster support separately. Prevent conflicting process ownership when quorum is unavailable.
 
-The opt-in Raft implementation and remaining exit criteria appear in [Phase 5 status](docs/PHASE_5_STATUS.md). See [cluster installation](docs/CLUSTER.md) for supported node roles and ownership assumptions.
+The opt-in Raft implementation includes a rehearsed OpenRaft upgrade, targeted leader transfer, and inventory of member builds, processes and files. [Phase 5 status](docs/PHASE_5_STATUS.md) tracks the remaining exit criteria. See [cluster installation](docs/CLUSTER.md) for node roles and ownership assumptions.
 
 ### 6 — Release and maintenance (candidate, exit criteria open)
 
-The candidate adds GraphQL, operator CLI, offline Go JSON migration, verified SQLite restore, release packaging and dependency policies. The [release status](docs/PHASE_6_STATUS.md) tracks unfinished work across the roadmap and current verification evidence. Stable publication requires the separate [acceptance checklist](docs/RELEASE_ACCEPTANCE.md).
+The candidate adds GraphQL, operator CLI, offline Go JSON migration, verified SQLite restore, and same-commit Linux AMD64, Linux ARM64 and Windows AMD64 release packaging. The [release status](docs/PHASE_6_STATUS.md) tracks the dependency policy, verification evidence and unfinished roadmap work. Stable publication requires the separate [acceptance checklist](docs/RELEASE_ACCEPTANCE.md).
 
 ## Quality gates
 

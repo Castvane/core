@@ -133,7 +133,9 @@ def main():
         (work / "DEPENDENCIES.tsv").write_text("\n".join(licenses) + "\n", encoding="utf-8")
         artifact_paths.update({key: work / key for key in ("bom.cdx.json", "DEPENDENCIES.tsv")})
         if system == "windows":
-            with zipfile.ZipFile(work / archive.name, "w", zipfile.ZIP_DEFLATED) as zip_archive:
+            with zipfile.ZipFile(
+                work / archive.name, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
+            ) as zip_archive:
                 for entry, source in sorted(artifact_paths.items()):
                     zip_archive.write(source, f"{name}/{entry}")
         else:

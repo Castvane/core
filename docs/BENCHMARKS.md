@@ -23,6 +23,20 @@ python3 scripts/benchmark-management.py target/release/restreamer-core \
   --reference /path/to/pinned-go-core --repetitions 3 --clients 8 --seconds 2
 ```
 
+## Dependency-upgrade rerun
+
+The locked release build at `22122f4` and the same pinned Go executable ran the three-trial management fixture on Linux AMD64 with three assigned CPUs. Each run used eight clients and two seconds per endpoint.
+
+| Measurement | Castvane median (range) | Go median (range) |
+| --- | --- | --- |
+| Launch to successful `/ping` | 114.58 ms (105.41–120.12) | 445.51 ms (441.75–560.48) |
+| Idle RSS | 20,632 KiB (20,468–20,648) | 31,324 KiB (31,208–31,712) |
+| `/ping` throughput | 10,366 requests/s (10,272–10,827) | 9,468 requests/s (9,220–9,645) |
+| `/api` discovery throughput | 7,028 requests/s (6,842–7,930) | 9,653 requests/s (8,681–9,873) |
+| Binary bytes | 44,700,880 | 58,547,705 |
+
+Startup and request timings vary between runs. These measurements cover synthetic loopback management traffic.
+
 ## Candidate-only workloads
 
 The release binary completed the [60-second recovery and four-node cluster measurements](PHASE_6_STATUS.md#automated-verification) with FFmpeg 7.1.5. Cluster times include lease and scheduling settings. No Go cluster workload was run.

@@ -4,7 +4,7 @@ Castvane Core is an independent MIT-licensed project. It implements a compatibil
 
 ## Rust components
 
-A native candidate includes a CycloneDX SBOM, declared package licenses in `DEPENDENCIES.tsv`, and the packaged notices and license files collected from crate source distributions. Run `cargo deny --locked check` against [deny.toml](deny.toml) to review the two Linux build graphs. Embedded SQLite is built by SQLx using the bundled SQLite source. OpenRaft and rustls are available under MIT or Apache-2.0. Async-GraphQL uses MIT or Apache-2.0. The AWS-LC family includes the licenses and notices named in its crate distributions. The full lockfile also resolves packages for platforms outside the supported builds.
+A native candidate includes a CycloneDX SBOM, declared package licenses in `DEPENDENCIES.tsv`, and the packaged notices and license files collected from crate source distributions. Run `cargo deny --locked check` against [deny.toml](deny.toml) to review the Linux AMD64, Linux ARM64 and Windows AMD64 build graphs. Embedded SQLite is built by SQLx using the bundled SQLite source. OpenRaft, its compatibility adapter and rustls are available under MIT or Apache-2.0. Async-GraphQL uses MIT or Apache-2.0. The AWS-LC family includes the licenses and notices named in its crate distributions. The full lockfile also resolves packages for platforms outside the supported builds.
 
 ## External media executables
 

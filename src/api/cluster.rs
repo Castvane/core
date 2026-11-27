@@ -5,7 +5,8 @@ use std::{collections::BTreeSet, sync::Arc};
 use axum::{
     Extension, Json, Router,
     extract::{Path, Query, State, rejection::JsonRejection},
-    http::StatusCode,
+    http::{StatusCode, Uri},
+    response::IntoResponse,
     routing::{get, put},
 };
 use serde::Deserialize;
@@ -16,7 +17,7 @@ use crate::{
     App,
     auth::Identity,
     cluster::{
-        Cluster, Failure,
+        Cluster, Failure, diagnostics,
         model::{Action, Collection, Job, Node, Requirements},
     },
 };
@@ -36,6 +37,9 @@ pub fn routes() -> Router<Arc<App>> {
             .route("/node", get(nodes))
             .route("/node/{id}", get(node).post(enroll))
             .route("/node/{id}/version", get(node_version))
+            .route("/node/{id}/files", get(node_media))
+            .route("/node/{id}/process", get(node_processes))
+            .route("/fs/{storage}", get(cluster_files))
             .route("/node/{id}/fs/{storage}", get(node_files))
             .route(
                 "/node/{id}/fs/{storage}/{*path}",
@@ -164,9 +168,51 @@ async fn node_version(
     let cluster = authorized(&app, &actor)?;
     let id = id.parse().map_err(|_| Failure::Invalid)?;
     Ok(Json(
+        cluster.diagnostics(id, diagnostics::Query::Version).await?,
+    ))
+}
+
+async fn node_media(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let id = id.parse().map_err(|_| Failure::Invalid)?;
+    Ok(Json(
+        cluster.diagnostics(id, diagnostics::Query::Files).await?,
+    ))
+}
+
+async fn node_processes(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+    uri: Uri,
+) -> Reply {
+    let cluster = authorized(&app, &actor)?;
+    let id = id.parse().map_err(|_| Failure::Invalid)?;
+    let query = uri.query().map(str::to_owned);
+    Ok(Json(
         cluster
-            .diagnostics(id, crate::cluster::diagnostics::Query::Version)
+            .diagnostics(id, diagnostics::Query::Processes { query })
             .await?,
+    ))
+}
+
+async fn cluster_files(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(storage): Path<String>,
+    uri: Uri,
+) -> Result<impl IntoResponse, ApiError> {
+    let cluster = authorized(&app, &actor)?;
+    let (files, unavailable) = cluster
+        .storage_files(storage, uri.query().map(str::to_owned))
+        .await?;
+    Ok((
+        [("x-castvane-unavailable-nodes", unavailable.to_string())],
+        Json(files),
     ))
 }
 

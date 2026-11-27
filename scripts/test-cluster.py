@@ -229,6 +229,10 @@ def exercise(binary, root, upgrade_from=None):
         assert leader_node.request("GET", "/api/v3/cluster", auth=False)[0] in (401, 403)
         if upgrade_from is not None:
             leader_node.call("PUT", "/db/kv/pre-upgrade", {"value": "retained"})
+            for index in range(68):
+                leader_node.call("PUT", f"/db/kv/pre-upgrade-{index}", {"value": index})
+            eventually(lambda: leader_node.call("GET", "/snapshot")["snapshot_index"],
+                       "older build did not persist a snapshot")
             for voter in (2, 3, 1, 4):
                 member = cohort[voter]
                 member.stop()
@@ -236,7 +240,11 @@ def exercise(binary, root, upgrade_from=None):
                 member.start()
                 leader_node = eventually(leader, "no quorum after rolling upgrade")
                 assert leader_node.call("GET", "/db/kv/pre-upgrade")["value"] == "retained"
-            print("Rolling upgrade retained the committed record.", flush=True)
+                assert leader_node.call("GET", "/db/kv/pre-upgrade-67")["value"] == 67
+                leader_node.call("PUT", f"/db/kv/upgrade-step-{voter}", {"value": voter})
+            for voter in (2, 3, 1, 4):
+                assert leader_node.call("GET", f"/db/kv/upgrade-step-{voter}")["value"] == voter
+            print("Rolling upgrade retained pre-upgrade snapshots and writes during the rollout.", flush=True)
 
         def control_readiness():
             code, body = cohort[1].request("GET", "/readyz", auth=False)
@@ -316,6 +324,16 @@ def exercise(binary, root, upgrade_from=None):
 
         assert {"name": "/fixture.txt", "size_bytes": 7}.items() <= leader_node.call(
             "GET", "/node/4/fs/disk?glob=fixture.txt")[0].items()
+        inventory = leader_node.call("GET", "/node/4/files")
+        assert inventory["last_update"] > 0 and inventory["files"]["disk"] == ["/fixture.txt"]
+        leader_node.call("GET", "/node/999/files", expected=404)
+        other = cohort[next(voter for voter in (1, 2, 3) if voter != leader_node.id)]
+        (other.directory / "media" / "fixture-secondary.txt").write_text("2")
+        listing = leader_node.call("GET", "/fs/disk?glob=fixture*.txt&sort=size&order=asc")
+        assert [(item["name"], item["size_bytes"]) for item in listing] == [
+            ("/fixture-secondary.txt", 1), ("/fixture.txt", 7),
+        ]
+        assert leader_node.call("GET", "/fs/unknown") == []
         assert leader_node.call("HEAD", "/node/4/fs/disk/fixture.txt") == b""
         assert leader_node.call("GET", "/node/4/fs/disk/fixture.txt") == b"fixture"
         assert leader_node.call("PUT", "/node/4/fs/disk/remote.json", {"value": 42}, expected=201) == b""
@@ -329,6 +347,10 @@ def exercise(binary, root, upgrade_from=None):
             "output": [{"id": "output", "address": "-", "options": ["-threads", "1", "-f", "null"]}],
         })
         original = eventually(lambda: media_running(leader_node, 4), "learner never ran FFmpeg")
+        jobs = leader_node.call("GET", "/node/4/process?id=video&filter=state")
+        assert len(jobs) == 1 and jobs[0]["id"] == "video"
+        assert jobs[0]["state"]["exec"] == "running" and "config" not in jobs[0]
+        assert leader_node.call("GET", "/node/4/process?reference=unmatched") == []
         assert leader_node.call("GET", "/process/video/playback")["http_origin"] == "https://worker-4.example.test"
         report = leader_node.call("GET", "/process/video/report")
         assert isinstance(report["history"], list)

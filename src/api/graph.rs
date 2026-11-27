@@ -406,7 +406,7 @@ async fn resolve(
                 String::new(),
                 String::new(),
             );
-            let mut result = process::process_view(app, &entry, &params, "")
+            let mut result = process::process_view(&app.processes, &entry, &params, "")
                 .await
                 .map_err(api_error)?;
             normalize_process(&mut result);

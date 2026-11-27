@@ -127,7 +127,9 @@ All paths in this table are relative to `/api/v3/cluster`. The Go router only re
 | GET `/db/process`, `/db/process/{id}`, `/db/user`, `/db/user/{name}`, `/db/policies`, `/db/node` | Raw Go store routes are absent. Use the Castvane process, identity, policy and node management routes. |
 | GET `/db/map/process` and `/db/map/reallocate` | Raw Go database maps are absent. Process and deployment views provide Castvane assignments and ownership epochs. |
 | GET `/db/kv` and `/db/locks` | Available with Castvane record revisions and lease tokens. Response shapes differ from Go. |
-| GET `/node/{id}/files`, `/node/{id}/process`, `/fs/{storage}` | Reference file and process summaries and aggregate filesystem listing are absent. Individual mounted storage reads are available through the node filesystem routes. |
+| GET `/node/{id}/files` | Returns `last_update` and sorted file paths by storage name from the reachable member. Empty mounts are omitted. Optional unavailable mounts are skipped. |
+| GET `/node/{id}/process` | Returns the member's live process list with legacy `filter`, `reference`, `id` and glob filters. Castvane also supports `offset` and `limit`. |
+| GET `/fs/{storage}` | Aggregates legacy file metadata across reachable members. Supports `glob`, `sort` and `order` and retains duplicate paths from separate members. Castvane caps the response and reports unreachable members through `X-Castvane-Unavailable-Nodes`. |
 | PUT `/node/{id}/fs` | Reference remote copy/move is absent. Per-node file PUT and DELETE are supported. |
 | POST `/events`, `/events/log`, `/events/process` | Cluster-wide event forwarding is absent. Use local event subscriptions with the relevant node. |
 | GET `/node/{id}/version` | Returns the six legacy build fields from the requested reachable member. Castvane reports its own version and leaves the build date empty. Requires an administrator on the leader with quorum. |

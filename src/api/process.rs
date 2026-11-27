@@ -66,7 +66,7 @@ type QueryArgs = Result<Query<Params>, QueryRejection>;
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
-pub(super) struct Params {
+pub(crate) struct Params {
     domain: String,
     pub filter: String,
     id: String,
@@ -303,7 +303,7 @@ async fn get_job(State(app): State<Arc<App>>, Path(id): Path<String>, args: Quer
     let entry = app.processes.get(&params.key(id)).await?;
     let (_, settings) = super::read_settings(&app).await?;
     Ok(Json(
-        process_view(&app, &entry, &params, &settings.id).await?,
+        process_view(&app.processes, &entry, &params, &settings.id).await?,
     ))
 }
 
@@ -322,9 +322,19 @@ pub(super) async fn process_list(
     limit: usize,
 ) -> Response {
     let (_, settings) = super::read_settings(app).await?;
+    process_list_from_engine(&app.processes, &settings.id, actor, params, limit).await
+}
+
+pub(crate) async fn process_list_from_engine(
+    engine: &engine::Engine,
+    core_id: &str,
+    actor: &Identity,
+    params: Params,
+    limit: usize,
+) -> Response {
     let mut items = Vec::new();
-    let mut used = 0;
-    let entries = app.processes.list().await;
+    let mut used = 2;
+    let entries = engine.list().await;
     for entry in entries
         .into_iter()
         .filter(|entry| {
@@ -335,8 +345,8 @@ pub(super) async fn process_list(
         .skip(params.offset)
         .take(params.limit.unwrap_or(engine::MAX_JOBS))
     {
-        let item = process_view(app, &entry, &params, &settings.id).await?;
-        used += item.to_string().len();
+        let item = process_view(engine, &entry, &params, core_id).await?;
+        used += item.to_string().len() + 1;
         if used > limit {
             return Err(ApiError::Http(
                 StatusCode::PAYLOAD_TOO_LARGE,
@@ -349,7 +359,7 @@ pub(super) async fn process_list(
 }
 
 pub(super) async fn process_view(
-    app: &App,
+    engine: &engine::Engine,
     entry: &Entry,
     params: &Params,
     core_id: &str,
@@ -369,12 +379,12 @@ pub(super) async fn process_view(
             process["state"] = dto::state(config, job.desired, &runtime);
         }
         if params.includes("report") {
-            let history = app.processes.history(&job.uid).await?;
+            let history = engine.history(&job.uid).await?;
             process["report"] = dto::report(&runtime.active, &history, &config.limits);
         }
     }
     if params.includes("metadata") {
-        let metadata = app.processes.metadata(Some(&job.uid)).await?;
+        let metadata = engine.metadata(Some(&job.uid)).await?;
         if !metadata.is_empty() {
             process["metadata"] = json!(metadata);
         }

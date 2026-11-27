@@ -586,6 +586,9 @@ fn cluster_paths(spec: &mut Value) {
         ("/node", &["get"][..]),
         ("/node/{id}", &["get", "post"][..]),
         ("/node/{id}/version", &["get"][..]),
+        ("/node/{id}/files", &["get"][..]),
+        ("/node/{id}/process", &["get"][..]),
+        ("/fs/{storage}", &["get"][..]),
         ("/node/{id}/state", &["get", "put"][..]),
         ("/node/{id}/fs/{storage}", &["get"][..]),
         (
@@ -660,6 +663,70 @@ fn cluster_paths(spec: &mut Value) {
     transfer["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
     transfer["responses"]["200"] = ok();
     transfer["responses"]["405"] = error();
+
+    let node_files = &mut spec["paths"]["/api/v3/cluster/node/{id}/files"]["get"];
+    node_files["description"] = json!(
+        "List paths by mounted storage on a reachable member. Requires an administrator on the leader with quorum."
+    );
+    node_files["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
+    node_files["responses"]["200"] = json!({
+        "description":"Node file inventory",
+        "content":{"application/json":{"schema":{"type":"object","required":["last_update","files"],
+            "properties":{"last_update":{"type":"integer","minimum":0},
+                "files":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}}}
+        }}}
+    });
+    node_files["responses"]["507"] = error();
+
+    let processes = &mut spec["paths"]["/api/v3/cluster/node/{id}/process"]["get"];
+    processes["description"] = json!(
+        "List process instances on a reachable member. Requires an administrator on the leader with quorum."
+    );
+    processes["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
+    if let Some(parameters) = processes["parameters"].as_array_mut() {
+        for name in [
+            "filter",
+            "id",
+            "reference",
+            "idpattern",
+            "refpattern",
+            "ownerpattern",
+            "domainpattern",
+            "zonepattern",
+        ] {
+            parameters.push(json!({"name":name,"in":"query","schema":{"type":"string"}}));
+        }
+        for name in ["offset", "limit"] {
+            parameters
+                .push(json!({"name":name,"in":"query","schema":{"type":"integer","minimum":0}}));
+        }
+    }
+    processes["responses"]["200"] = json!({
+        "description":"Node process inventory",
+        "content":schema_content("Processes")
+    });
+    processes["responses"]["507"] = error();
+
+    let files = &mut spec["paths"]["/api/v3/cluster/fs/{storage}"]["get"];
+    files["description"] = json!(
+        "List matching files across reachable members. Requires an administrator on the leader with quorum. Identical names on separate nodes are retained."
+    );
+    files["parameters"] = json!([
+        {"name":"storage","in":"path","required":true,"schema":{"type":"string"}},
+        {"name":"glob","in":"query","schema":{"type":"string"}},
+        {"name":"sort","in":"query","schema":{"enum":["none","name","size","lastmod"],"default":"none"}},
+        {"name":"order","in":"query","schema":{"enum":["asc","desc"],"default":"asc"}}
+    ]);
+    files["responses"]["200"] = json!({
+        "description":"Files from reachable nodes",
+        "headers":{"X-Castvane-Unavailable-Nodes":{"schema":{"type":"integer","minimum":0}}},
+        "content":{"application/json":{"schema":{"type":"array","items":{"type":"object",
+            "required":["name","size_bytes","last_modified"],"properties":{
+                "name":{"type":"string"},"size_bytes":{"type":"integer","minimum":0},
+                "last_modified":{"type":"integer","minimum":0}}
+        }}}}
+    });
+    files["responses"]["507"] = error();
 }
 
 fn error() -> Value {

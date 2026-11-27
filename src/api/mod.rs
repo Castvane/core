@@ -7,7 +7,7 @@ pub(crate) mod media;
 pub(crate) mod media_http;
 mod openapi;
 mod operations;
-mod process;
+pub(crate) mod process;
 pub(crate) mod process_dto;
 mod zones;
 

@@ -22,7 +22,7 @@ use openraft::{
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::Semaphore};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
@@ -86,6 +86,7 @@ pub struct Cluster {
     stop: CancellationToken,
     network: Network,
     telemetry: work::SharedTelemetry,
+    file_listings: Semaphore,
     lease_ms: u64,
     rebalance: Option<Rebalance>,
 }
@@ -291,6 +292,7 @@ impl Cluster {
             stop,
             network,
             telemetry,
+            file_listings: Semaphore::new(4),
             lease_ms: settings.lease_ms,
             rebalance: settings.rebalance,
         }))

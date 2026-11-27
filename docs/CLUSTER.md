@@ -45,6 +45,8 @@ Optional CPU rebalancing is disabled by default. To enable it, set rebalance to 
 
 Use `PUT /api/v3/cluster/transfer/{id}` on the current leader to hand leadership to a numeric voter ID. The request requires an administrator and quorum. It returns the JSON string `"OK"` after the original node observes the requested leader. A learner cannot become leader. After a timeout, check `GET /api/v3/cluster` before retrying. Before handing leadership over in a mixed-version rollout, upgrade the target to a build that supports the transfer RPC. Use `GET /api/v3/cluster/node/{id}/version` on the leader to read a reachable member's actual build metadata once that member has been upgraded.
 
+Read the selected member's file inventory at `/api/v3/cluster/node/{id}/files` and its live job list at `/api/v3/cluster/node/{id}/process`. Use `filter=state` for process progress without full configurations and reports. `GET /api/v3/cluster/fs/{storage}` lists matching files across reachable members. It preserves duplicates and includes an `X-Castvane-Unavailable-Nodes` count. Narrow large listings with a glob. Use the node-specific storage routes to select the member for a download or write.
+
 ## Availability and recovery
 
 Writes require Raft quorum. After a write timeout, read the committed revision before retrying. KV supports expected revisions. Process updates reject conflicting revisions.

@@ -205,7 +205,7 @@ impl Transport {
             "logLevel":"error","logDestinations":["stdout"],"api":true,"apiAddress":api.to_string(),
             "authMethod":"http","authHTTPAddress":format!("http://{}/{secret}",callback.local_addr()?),
             "authHTTPExclude":[],
-            "rtsp":false,"hls":false,"webrtc":false,"playback":false,"metrics":false,"pprof":false,
+            "rtsp":false,"hls":false,"webrtc":false,"moq":false,"playback":false,"metrics":false,"pprof":false,
             "rtmp":rtmp.is_some(),"srt":srt.is_some(),"readTimeout":"10s","writeTimeout":"5s",
             "writeQueueSize":128,
             "pathDefaults":{"maxReaders":limits.per_stream.min(limits.total),

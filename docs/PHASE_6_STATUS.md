@@ -53,6 +53,8 @@ Linux AMD64 and ARM64 native binaries and Core-only container archives were buil
 
 A second workflow downloaded the artifacts and verified the archive checksums, source revision, platform labels, SLSA provenance and CycloneDX attestations. Native archives measured 14,795,251 bytes on AMD64 and 14,932,190 bytes on ARM64. The Core-only container archives measured 45,577,318 and 44,864,290 bytes respectively. These are compressed archive sizes. [Artifact verification](https://github.com/Castvane/core/actions/runs/45905871359)
 
+The `cdcaa9e` candidate built and smoke-tested native archives for Linux AMD64, Linux ARM64 and Windows AMD64, plus both Linux Core-only Docker archives. Independent verification passed archive checksums, source revisions, SLSA provenance and CycloneDX attestations for all five archives. [Candidate builds](https://github.com/Castvane/core/actions/runs/45964613605) · [Independent verification](https://github.com/Castvane/core/actions/runs/45965991323)
+
 The release workflows prepare verified candidates and an optional protected registry promotion job. The registry promotion job and the GitHub prerelease draft creation have not been exercised against live publishing destinations. Stable tags remain pending. The bundled FFmpeg build is exercised as a test image with corresponding-source review pending before public redistribution. [Publishing policy](RELEASING.md)
 
 ## Security and isolation
@@ -78,7 +80,7 @@ Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do
 
 - [x] Use an independent candidate application version and embed the source revision.
 - [x] Exercise deployment, authenticated control, standby member restoration and the supported rolling-upgrade rehearsal.
-- [x] Build Linux AMD64 and ARM64 native and Docker candidates and verify their checksums and attestations.
+- [x] Build native candidates for Linux AMD64, Linux ARM64 and Windows AMD64 and Docker candidates for Linux AMD64 and ARM64. Verify their checksums and attestations.
 - [x] Exercise backup and independently authored migration fixtures, including a store created by the pinned Go executable.
 - [x] Exercise pinned UI discovery/login/refresh with existing bundles and retain exact blockers.
 - [ ] Complete the remaining route/schema compatibility checks and legacy UI version policy before claiming support across the advertised UI range.

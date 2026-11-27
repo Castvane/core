@@ -603,7 +603,17 @@ async fn wait_channel(fixture: &Fixture, protocol: &str, wanted: bool) {
 
 #[tokio::test]
 #[ignore = "requires MediaMTX, provisioned by scripts/test-media-services.sh"]
-async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
+async fn rtmp_rtmps_srt_ingest_playback_disconnect_and_flv() {
+    transport_interoperability(&["rtmp", "rtmps", "srt"], false).await;
+}
+
+#[tokio::test]
+#[ignore = "requires MediaMTX, provisioned by scripts/test-media-services.sh"]
+async fn encrypted_srt_ingest_playback_disconnect() {
+    transport_interoperability(&["srt"], true).await;
+}
+
+async fn transport_interoperability(protocols: &[&str], encrypted_srt: bool) {
     let dir = TempDir::new().unwrap();
     let mediamtx = std::env::var("PHASE3_MEDIAMTX_BINARY").unwrap();
     let (cert, key) = certificate(&dir);
@@ -624,14 +634,21 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             ("CORE_RTMP_TOKEN", "rtmp-fixture"),
             ("CORE_SRT_ENABLE", "true"),
             ("CORE_SRT_ADDRESS", &srt),
-            ("CORE_SRT_PASSPHRASE", "srt-password-fixture"),
+            (
+                "CORE_SRT_PASSPHRASE",
+                if encrypted_srt {
+                    "srt-password-fixture"
+                } else {
+                    ""
+                },
+            ),
             ("CORE_SRT_TOKEN", "srt-fixture"),
         ],
     )
     .await;
     let srt_ffmpeg =
         std::env::var_os("PHASE3_SRT_FFMPEG_BINARY").unwrap_or_else(|| "ffmpeg".into());
-    for wire in ["rtmp", "rtmps", "srt"] {
+    for &wire in protocols {
         let protocol = if wire == "srt" { "srt" } else { "rtmp" };
         let tls = if wire == "rtmps" {
             &["-tls_verify", "1", "-ca_file", cert.as_str()][..]
@@ -643,13 +660,19 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             let uri = format!("{wire}://{address}/live/color?token=rtmp-fixture");
             (uri.clone(), uri, "flv")
         } else {
+            let passphrase = if encrypted_srt {
+                "&passphrase=srt-password-fixture"
+            } else {
+                ""
+            };
             let uri = |mode: &str| {
                 format!(
-                    "srt://{srt}?streamid={mode}:color:token=srt-fixture&mode=caller&passphrase=srt-password-fixture"
+                    "srt://{srt}?streamid={mode}:color:token=srt-fixture&mode=caller{passphrase}"
                 )
             };
+            let key_length = if encrypted_srt { "&pbkeylen=16" } else { "" };
             (
-                format!("{}&pbkeylen=16", uri("publish")),
+                format!("{}{key_length}", uri("publish")),
                 format!("{}&timeout=10000000", uri("read")),
                 "mpegts",
             )

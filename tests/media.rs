@@ -629,6 +629,8 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
         ],
     )
     .await;
+    let srt_ffmpeg =
+        std::env::var_os("PHASE3_SRT_FFMPEG_BINARY").unwrap_or_else(|| "ffmpeg".into());
     for wire in ["rtmp", "rtmps", "srt"] {
         let protocol = if wire == "srt" { "srt" } else { "rtmp" };
         let tls = if wire == "rtmps" {
@@ -653,7 +655,12 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             )
         };
         let publisher_started = std::time::Instant::now();
-        let mut encoder = tokio::process::Command::new("ffmpeg");
+        let ffmpeg = if wire == "srt" {
+            srt_ffmpeg.as_os_str()
+        } else {
+            std::ffi::OsStr::new("ffmpeg")
+        };
+        let mut encoder = tokio::process::Command::new(ffmpeg);
         let mut child = encoder
             .kill_on_drop(true)
             .args([
@@ -727,7 +734,7 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
         };
         let status = tokio::time::timeout(
             Duration::from_secs(25),
-            tokio::process::Command::new("ffmpeg")
+            tokio::process::Command::new(ffmpeg)
                 .kill_on_drop(true)
                 .args(["-nostdin", "-v", "error"])
                 .args(tls)

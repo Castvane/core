@@ -78,6 +78,22 @@ jobs:
           }
           Expand-Archive -Path $archive -DestinationPath $fixture
           $env:PHASE3_MEDIAMTX_BINARY = Join-Path $fixture "mediamtx.exe"
+          # Exercise encrypted SRT with a separate build from the general Windows smoke.
+          $ffmpegRelease = "autobuild-2026-11-26-12-56"
+          $ffmpegAsset = "ffmpeg-n9.0.2-982-g836df4e858-win64-gpl-shared-9.0.zip"
+          $ffmpegArchive = Join-Path $env:RUNNER_TEMP $ffmpegAsset
+          $ffmpegFixture = Join-Path $env:RUNNER_TEMP "castvane-srt-ffmpeg"
+          Invoke-WebRequest -Uri "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/$ffmpegRelease/$ffmpegAsset" -OutFile $ffmpegArchive
+          $ffmpegDigest = "f37999a6f9efb828addfc58f1a93142c73f50045bcfbc8575aa45ed40e98b2e6"
+          if ((Get-FileHash -Algorithm SHA256 $ffmpegArchive).Hash -ne $ffmpegDigest) {
+            throw "SRT FFmpeg fixture checksum mismatch"
+          }
+          Expand-Archive -Path $ffmpegArchive -DestinationPath $ffmpegFixture
+          $srtBinary = Get-ChildItem $ffmpegFixture -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $srtBinary) { throw "The SRT fixture is missing ffmpeg.exe" }
+          $env:PHASE3_SRT_FFMPEG_BINARY = $srtBinary.FullName
+          & $env:PHASE3_SRT_FFMPEG_BINARY -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --test media rtmp_srt_encrypted_ingest_playback_disconnect_and_flv -- --ignored --nocapture
           exit $LASTEXITCODE
       - run: cargo build --locked --release

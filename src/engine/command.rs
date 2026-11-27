@@ -311,7 +311,9 @@ impl Options {
                     .memory_auth
                     .as_ref()
                     .is_some_and(|(user, _)| url.username() == user)
-                && cleanup_location(self, &address).is_some_and(|(name, _)| name != "disk")
+                && cleanup_location(self, &address).is_some_and(|(name, key)| {
+                    name != "disk" && crate::media::storage::Key::parse(&key).is_ok()
+                })
             {
                 if !opts.iter().any(|value| value == "-auth_type") {
                     opts.extend(["-auth_type".into(), "basic".into()]);
@@ -1047,7 +1049,7 @@ fn cleanup_location(options: &Options, value: &str) -> Option<(String, String)> 
                 let path = percent_encoding::percent_decode_str(path)
                     .decode_utf8()
                     .ok()?;
-                crate::media::storage::Key::parse(&path).ok()?;
+                crate::media::storage::validate_relative_path(&path).ok()?;
                 return Some((name.to_owned(), path.into_owned()));
             }
         }
@@ -1060,7 +1062,7 @@ fn cleanup_location(options: &Options, value: &str) -> Option<(String, String)> 
     let path = path.to_str()?;
     #[cfg(windows)]
     let path = &path.replace('\\', "/");
-    crate::media::storage::Key::parse(path).ok()?;
+    crate::media::storage::validate_relative_path(path).ok()?;
     Some(("disk".into(), path.into()))
 }
 

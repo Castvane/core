@@ -26,19 +26,8 @@ pub struct Key(String);
 impl Key {
     pub fn parse(value: &str) -> Result<Self, Error> {
         let value = value.strip_prefix('/').unwrap_or(value);
-        if value.is_empty()
-            || value.len() > 2048
-            || value.contains('\\')
-            || value.chars().any(char::is_control)
-            || value.split('/').any(|part| {
-                part.is_empty()
-                    || part == "."
-                    || part == ".."
-                    || part.len() > 255
-                    || part.starts_with(".core-upload-")
-                    || (cfg!(windows) && windows_reserved(part))
-            })
-        {
+        validate_relative_path(value)?;
+        if cfg!(windows) && value.split('/').any(windows_reserved) {
             return Err(Error::Invalid);
         }
         Ok(Self(value.to_owned()))
@@ -47,6 +36,24 @@ impl Key {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+pub(crate) fn validate_relative_path(value: &str) -> Result<(), Error> {
+    if value.is_empty()
+        || value.len() > 2048
+        || value.contains('\\')
+        || value.chars().any(char::is_control)
+        || value.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.len() > 255
+                || part.starts_with(".core-upload-")
+        })
+    {
+        return Err(Error::Invalid);
+    }
+    Ok(())
 }
 
 fn windows_reserved(part: &str) -> bool {

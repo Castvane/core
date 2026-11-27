@@ -1,3 +1,5 @@
+use openraft::rt::WatchReceiver;
+
 use std::{sync::Arc, time::Duration};
 
 use axum::{
@@ -119,7 +121,7 @@ impl Cluster {
         if !self
             .raft
             .metrics()
-            .borrow()
+            .borrow_watched()
             .membership_config
             .nodes()
             .any(|(node, _)| *node == id)

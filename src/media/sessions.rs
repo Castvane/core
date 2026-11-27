@@ -147,12 +147,10 @@ impl Sessions {
             scope: request.scope.clone(),
             remote,
         };
-        request.token = jsonwebtoken::encode(
-            &Header::new(Algorithm::HS256),
-            &claim,
-            &EncodingKey::from_secret(&self.key.read().map_err(|_| Error::Unavailable)?),
-        )
-        .map_err(|_| Error::Unavailable)?;
+        let key = self.key.read().map_err(|_| Error::Unavailable)?;
+        let key = EncodingKey::from_secret(&key).map_err(|_| Error::Unavailable)?;
+        request.token = jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claim, &key)
+            .map_err(|_| Error::Unavailable)?;
         Ok(())
     }
 
@@ -166,9 +164,10 @@ impl Sessions {
         let Ok(key) = self.key.read() else {
             return false;
         };
-        let Ok(token) =
-            jsonwebtoken::decode::<Token>(token, &DecodingKey::from_secret(&key), &validation)
-        else {
+        let Ok(key) = DecodingKey::from_secret(&key) else {
+            return false;
+        };
+        let Ok(token) = jsonwebtoken::decode::<Token>(token, &key, &validation) else {
             return false;
         };
         let claim = token.claims;

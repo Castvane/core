@@ -7,7 +7,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-argon2 = { version = "0.5", features = ["std"] }
+argon2 = "0.6"
 async-trait = "0.1"
 tempfile = "3"
 subtle = "2"
@@ -21,7 +21,7 @@ object_store = { version = "0.14", default-features = false, features = ["aws"] 
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
-base64 = "0.22"
+base64 = "0.23"
 url = "2"
 percent-encoding = "2"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
@@ -30,9 +30,9 @@ jiff = "1"
 croner = { version = "5", default-features = false, features = ["std", "jiff"] }
 glob = "0.3"
 regex = "1"
-getrandom = "0.3"
+getrandom = "0.4"
 ipnet = { version = "2", features = ["serde"] }
-jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
@@ -47,13 +47,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower = { version = "0.5", features = ["util"] }
 instant-acme = { version = "0.8.5", features = ["rcgen"] }
 x509-parser = "0.18"
-openraft = { version = "0.9.22", features = ["serde"] }
+openraft = { version = "0.10", default-features = false, features = ["serde", "tokio-rt", "type-alias"] }
+openraft-legacy = { version = "0.10", features = ["serde"] }
 clap = { version = "4.6", features = ["derive"] }
 sha2 = "0.11"
 async-graphql = { version = "7.2", default-features = false, features = ["dynamic-schema"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.31", features = ["signal", "process", "feature", "fs"] }
+nix = { version = "0.32", features = ["signal", "process", "feature", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
 win32job = "2.1"

@@ -172,6 +172,12 @@ pub struct Command {
     pub action: Action,
 }
 
+impl std::fmt::Display for Command {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, formatter)
+    }
+}
+
 impl std::fmt::Debug for Command {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

@@ -1,7 +1,7 @@
 // OpenRaft defines the error types returned by its storage and transport traits.
 #![allow(clippy::result_large_err)]
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, io::Cursor, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
@@ -11,19 +11,25 @@ use axum::{
 };
 use hyper_util::rt::TokioIo;
 use openraft::{
-    BasicNode, RaftNetwork, RaftNetworkFactory,
-    error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable},
+    RaftNetworkFactory,
+    alias::VoteOf,
+    errors::{RPCError, RaftError, Unreachable},
+    impls::BasicNode,
     network::RPCOption,
-    raft::{
-        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
-        InstallSnapshotResponse, VoteRequest, VoteResponse,
-    },
+    raft::{AppendEntriesRequest, AppendEntriesResponse, ReadPolicy, VoteRequest, VoteResponse},
+};
+use openraft_legacy::network_v1::{
+    Adapter, ChunkedSnapshotReceiver, InstallSnapshotError, InstallSnapshotRequest,
+    InstallSnapshotResponse, RaftNetwork,
 };
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{
+    Serialize,
+    de::{DeserializeOwned, IgnoredAny},
+};
 use tokio::{net::TcpListener, sync::Semaphore};
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
@@ -90,22 +96,23 @@ pub fn tls(
 }
 
 impl RaftNetworkFactory<Types> for Network {
-    type Network = Connection;
-    async fn new_client(&mut self, target: u64, _node: &BasicNode) -> Connection {
+    type Network = Adapter<Types, Connection, Cursor<Vec<u8>>>;
+    async fn new_client(&mut self, target: u64, _node: &BasicNode) -> Self::Network {
         Connection {
             network: self.clone(),
             target,
         }
+        .into_v2()
     }
 }
 
 impl Connection {
-    async fn call<T: DeserializeOwned, E: DeserializeOwned + std::error::Error + 'static>(
+    async fn call<T: DeserializeOwned, E: std::error::Error>(
         &self,
         path: &str,
         body: impl Serialize,
         option: RPCOption,
-    ) -> Result<T, RPCError<u64, BasicNode, RaftError<u64, E>>> {
+    ) -> Result<T, RPCError<Types, E>> {
         let unavailable = |error: &str| {
             RPCError::Unreachable(Unreachable::new(&std::io::Error::other(error.to_owned())))
         };
@@ -139,9 +146,9 @@ impl Connection {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let result: Result<T, RaftError<u64, E>> = serde_json::from_slice(&bytes)
+        let result: Result<T, IgnoredAny> = serde_json::from_slice(&bytes)
             .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?;
-        result.map_err(|error| RPCError::RemoteError(RemoteError::new(self.target, error)))
+        result.map_err(|_| unavailable("cluster peer could not complete the RPC"))
     }
 }
 
@@ -150,15 +157,15 @@ impl RaftNetwork<Types> for Connection {
         &mut self,
         rpc: AppendEntriesRequest<Types>,
         option: RPCOption,
-    ) -> Result<AppendEntriesResponse<u64>, RPCError<u64, BasicNode, RaftError<u64>>> {
+    ) -> Result<AppendEntriesResponse<Types>, RPCError<Types, RaftError<Types>>> {
         self.call("append", rpc, option).await
     }
 
     async fn vote(
         &mut self,
-        rpc: VoteRequest<u64>,
+        rpc: VoteRequest<Types>,
         option: RPCOption,
-    ) -> Result<VoteResponse<u64>, RPCError<u64, BasicNode, RaftError<u64>>> {
+    ) -> Result<VoteResponse<Types>, RPCError<Types, RaftError<Types>>> {
         self.call("vote", rpc, option).await
     }
 
@@ -167,14 +174,14 @@ impl RaftNetwork<Types> for Connection {
         rpc: InstallSnapshotRequest<Types>,
         option: RPCOption,
     ) -> Result<
-        InstallSnapshotResponse<u64>,
-        RPCError<u64, BasicNode, RaftError<u64, InstallSnapshotError>>,
+        InstallSnapshotResponse<Types>,
+        RPCError<Types, RaftError<Types, InstallSnapshotError>>,
     > {
         self.call("snapshot", rpc, option).await
     }
 }
 
-fn sender(peer: u64, vote: openraft::Vote<u64>) -> Result<(), StatusCode> {
+fn sender(peer: u64, vote: VoteOf<Types>) -> Result<(), StatusCode> {
     if vote.leader_id().node_id == peer {
         Ok(())
     } else {
@@ -204,9 +211,9 @@ pub async fn serve(
                 .route(
                     "/read-fence",
                     post(|State(raft): State<Raft>| async move {
-                        raft.ensure_linearizable()
+                        raft.ensure_linearizable(ReadPolicy::ReadIndex)
                             .await
-                            .map(Json)
+                            .map(|fence| Json(*fence.log_id()))
                             .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
                     }),
                 )
@@ -224,7 +231,11 @@ pub async fn serve(
                          Extension(peer): Extension<u64>,
                          Json(rpc): Json<AppendEntriesRequest<Types>>| async move {
                             sender(peer, rpc.vote)?;
-                            Ok::<_, StatusCode>(Json(raft.append_entries(rpc).await))
+                            Ok::<_, StatusCode>(Json(
+                                raft.append_entries(rpc)
+                                    .await
+                                    .map(AppendEntriesResponse::from),
+                            ))
                         },
                     ),
                 )
@@ -233,7 +244,7 @@ pub async fn serve(
                     post(
                         |State(raft): State<Raft>,
                          Extension(peer): Extension<u64>,
-                         Json(rpc): Json<VoteRequest<u64>>| async move {
+                         Json(rpc): Json<VoteRequest<Types>>| async move {
                             sender(peer, rpc.vote)?;
                             Ok::<_, StatusCode>(Json(raft.vote(rpc).await))
                         },

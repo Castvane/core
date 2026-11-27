@@ -1,3 +1,5 @@
+use openraft::rt::WatchReceiver;
+
 use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
@@ -553,7 +555,7 @@ async fn snapshot(State(app): StateArg, Extension(actor): Actor) -> Reply {
     let cluster = authorized(&app, &actor)?;
     cluster.quorum().await?;
     let metrics = cluster.raft.metrics();
-    let metrics = metrics.borrow();
+    let metrics = metrics.borrow_watched();
     Ok(Json(
         json!({"snapshot_index":metrics.snapshot.map(|log|log.index),"applied_index":metrics.last_applied.map(|log|log.index)}),
     ))

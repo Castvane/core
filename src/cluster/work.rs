@@ -1,3 +1,5 @@
+use openraft::rt::WatchReceiver;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, RwLock},
@@ -159,7 +161,12 @@ impl Cluster {
         let Ok(state) = self.local().await else {
             return;
         };
-        let membership = self.raft.metrics().borrow().membership_config.clone();
+        let membership = self
+            .raft
+            .metrics()
+            .borrow_watched()
+            .membership_config
+            .clone();
         for (id, _) in membership.nodes() {
             if state.get(Collection::Node, &id.to_string()).is_none() {
                 if let Some(peer) = self.peers.get(id) {

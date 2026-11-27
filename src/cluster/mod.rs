@@ -7,13 +7,18 @@ pub(crate) mod work;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::Cursor,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
-use openraft::{BasicNode, ServerState, storage::Adaptor};
+use openraft::{
+    ServerState,
+    alias::LogIdOf,
+    impls::BasicNode,
+    raft::ReadPolicy,
+    rt::{Instant as _, WatchReceiver},
+};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -27,7 +32,7 @@ use network::Network;
 use storage::SqliteStore;
 
 openraft::declare_raft_types!(pub Types: D = Command, R = Applied);
-pub type Raft = openraft::Raft<Types>;
+pub type Raft = openraft::Raft<Types, SqliteStore>;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -232,7 +237,6 @@ impl Cluster {
             peers: peers.clone(),
             cluster: Arc::from(settings.cluster.as_str()),
         };
-        let (logs, machine) = Adaptor::new(database.clone());
         let config = openraft::Config {
             cluster_name: settings.cluster.clone(),
             election_timeout_min: 800,
@@ -251,8 +255,8 @@ impl Cluster {
             settings.id,
             Arc::new(config),
             network.clone(),
-            logs,
-            machine,
+            database.clone(),
+            database.clone(),
         )
         .await?;
         if !settings.bootstrap.is_empty() && !raft.is_initialized().await? {
@@ -294,7 +298,7 @@ impl Cluster {
 
     pub fn readiness(&self) -> (bool, bool) {
         let metrics = self.raft.metrics();
-        let metrics = metrics.borrow();
+        let metrics = metrics.borrow_watched();
         let joined = metrics.current_leader.is_some()
             && metrics
                 .membership_config
@@ -365,7 +369,7 @@ impl Cluster {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let fence: Option<openraft::LogId<u64>> =
+        let fence: Option<LogIdOf<Types>> =
             serde_json::from_slice(&bytes).map_err(|_| Failure::Unavailable)?;
         let machine = self
             .store
@@ -379,10 +383,13 @@ impl Cluster {
     }
 
     pub async fn quorum(&self) -> Result<(), Failure> {
-        tokio::time::timeout(Duration::from_secs(3), self.raft.ensure_linearizable())
-            .await
-            .map_err(|_| Failure::Unavailable)?
-            .map_err(|_| Failure::Unavailable)?;
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            self.raft.ensure_linearizable(ReadPolicy::ReadIndex),
+        )
+        .await
+        .map_err(|_| Failure::Unavailable)?
+        .map_err(|_| Failure::Unavailable)?;
         Ok(())
     }
 
@@ -405,16 +412,16 @@ impl Cluster {
 
     pub fn about(&self) -> Value {
         let receiver = self.raft.metrics();
-        let metrics = receiver.borrow();
+        let metrics = receiver.borrow_watched();
         let leader = metrics.current_leader;
+        let last_contact = metrics
+            .last_quorum_acked
+            .map(|ack| ack.into_inner().elapsed().as_millis() as u64);
         let state = if metrics.running_state.is_err() || leader.is_none() {
             "unavailable"
         } else if metrics.state != ServerState::Leader {
             "read-only"
-        } else if metrics
-            .millis_since_quorum_ack
-            .is_some_and(|elapsed| elapsed > 1600)
-        {
+        } else if last_contact.is_some_and(|elapsed| elapsed > 1600) {
             "degraded"
         } else {
             "healthy"
@@ -429,7 +436,7 @@ impl Cluster {
             "leader":{"id":leader.map(|id|id.to_string()).unwrap_or_default(),
                 "address":leader.and_then(|id|self.peers.get(&id)).map(|peer|&peer.address),"elected_since":0},
             "raft":{"address":self.peers.get(&self.id).map(|peer| &peer.address),
-                "state":metrics.state,"num_peers":voters.len(),"last_contact":metrics.millis_since_quorum_ack,
+                "state":metrics.state,"num_peers":voters.len(),"last_contact":last_contact,
                 "log_term":metrics.current_term,"log_index":metrics.last_log_index,"snapshot_index":metrics.snapshot.map(|log|log.index)},
             "nodes":nodes,"version":env!("CARGO_PKG_VERSION")
         })
@@ -437,7 +444,7 @@ impl Cluster {
 
     pub fn prometheus(&self) -> String {
         let receiver = self.raft.metrics();
-        let metrics = receiver.borrow();
+        let metrics = receiver.borrow_watched();
         format!(
             "# TYPE castvane_cluster_is_leader gauge\ncastvane_cluster_is_leader {}\n# TYPE castvane_cluster_voters gauge\ncastvane_cluster_voters {}\n# TYPE castvane_cluster_log_index gauge\ncastvane_cluster_log_index {}\n# TYPE castvane_cluster_applied_index gauge\ncastvane_cluster_applied_index {}\n",
             u8::from(metrics.state == ServerState::Leader),

@@ -5,10 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use argon2::{
-    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-    password_hash::{SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
@@ -220,12 +217,9 @@ impl Authentication {
             generation: generation.into(),
         };
         let key = self.key.read().map_err(|_| "signing key unavailable")?;
-        jsonwebtoken::encode(
-            &Header::new(Algorithm::HS256),
-            &claims,
-            &EncodingKey::from_secret(&key),
-        )
-        .map_err(|_| "signing failed")
+        let key = EncodingKey::from_secret(&key).map_err(|_| "invalid signing key")?;
+        jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claims, &key)
+            .map_err(|_| "signing failed")
     }
 
     #[cfg(test)]
@@ -256,10 +250,10 @@ impl Authentication {
         validation.set_issuer(&[ISSUER]);
         validation.set_required_spec_claims(&["exp", "iss", "sub"]);
         let key = self.key.read().map_err(|_| TokenError::Invalid)?;
-        let claims =
-            jsonwebtoken::decode::<Claims>(token, &DecodingKey::from_secret(&key), &validation)
-                .map_err(|_| TokenError::Invalid)?
-                .claims;
+        let key = DecodingKey::from_secret(&key).map_err(|_| TokenError::Invalid)?;
+        let claims = jsonwebtoken::decode::<Claims>(token, &key, &validation)
+            .map_err(|_| TokenError::Invalid)?
+            .claims;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         if claims.iat > now || claims.exp <= now {
             return Err(TokenError::Invalid);
@@ -273,9 +267,8 @@ impl Authentication {
 
 pub async fn hash_password(password: Zeroizing<String>) -> Result<String, &'static str> {
     tokio::task::spawn_blocking(move || {
-        let salt = SaltString::generate(&mut OsRng);
         Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
+            .hash_password(password.as_bytes())
             .map(|hash| hash.to_string())
             .map_err(|_| "password hashing failed")
     })

@@ -5,8 +5,8 @@ all-features = true
 [advisories]
 unmaintained = "all"
 ignore = [
-    { id = "RUSTSEC-2026-0542", reason = "Unmaintained transitively via stable OpenRaft. Review at the next consensus-library upgrade." },
-    { id = "RUSTSEC-2026-0543", reason = "Unmaintained transitively via OpenRaft and dependencies. Review before the first stable release." },
+    { id = "RUSTSEC-2026-0542", reason = "Unmaintained humantime is used by the S3 object_store SDK. Review before the first stable release." },
+    { id = "RUSTSEC-2026-0543", reason = "Unmaintained chrono remains transitive through the S3 object_store SDK. Review at the next SDK upgrade." },
 ]
 
 [licenses]

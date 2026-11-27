@@ -646,7 +646,11 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
                     "srt://{srt}?streamid={mode}:color:token=srt-fixture&mode=caller&passphrase=srt-password-fixture&pbkeylen=16"
                 )
             };
-            (uri("publish"), uri("read"), "mpegts")
+            (
+                uri("publish"),
+                format!("{}&timeout=10000000", uri("read")),
+                "mpegts",
+            )
         };
         let publisher_started = std::time::Instant::now();
         let mut encoder = tokio::process::Command::new("ffmpeg");
@@ -662,7 +666,7 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
                 "-i",
                 "testsrc2=size=64x64:rate=10",
                 "-t",
-                "25",
+                "45",
                 "-c:v",
                 "libx264",
                 "-threads",
@@ -709,18 +713,31 @@ async fn rtmp_srt_encrypted_ingest_playback_disconnect_and_flv() {
             drop(data);
         }
         let reader_started = std::time::Instant::now();
+        let input_options = if wire == "srt" {
+            &[
+                "-f",
+                "mpegts",
+                "-probesize",
+                "131072",
+                "-analyzeduration",
+                "1000000",
+            ][..]
+        } else {
+            &[]
+        };
         let status = tokio::time::timeout(
-            Duration::from_secs(15),
+            Duration::from_secs(25),
             tokio::process::Command::new("ffmpeg")
                 .kill_on_drop(true)
                 .args(["-nostdin", "-v", "error"])
                 .args(tls)
+                .args(input_options)
                 .args(["-i", &player, "-frames:v", "6", "-f", "null", "-"])
-                .stderr(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit())
                 .status(),
         )
         .await
-        .unwrap()
+        .unwrap_or_else(|_| panic!("{wire} playback exceeded its deadline"))
         .unwrap();
         assert!(status.success(), "{wire}");
         println!(

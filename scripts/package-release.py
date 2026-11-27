@@ -27,7 +27,7 @@ TARGETS = {
 def metadata(target):
     return json.loads(subprocess.check_output(
         ["cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", target],
-        cwd=ROOT, text=True,
+        cwd=ROOT,
     ))
 
 
@@ -130,7 +130,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=args.output) as work:
         work = Path(work)
         (work / "bom.cdx.json").write_text(json.dumps(bom, indent=2) + "\n")
-        (work / "DEPENDENCIES.tsv").write_text("\n".join(licenses) + "\n")
+        (work / "DEPENDENCIES.tsv").write_text("\n".join(licenses) + "\n", encoding="utf-8")
         artifact_paths.update({key: work / key for key in ("bom.cdx.json", "DEPENDENCIES.tsv")})
         if system == "windows":
             with zipfile.ZipFile(work / archive.name, "w", zipfile.ZIP_DEFLATED) as zip_archive:

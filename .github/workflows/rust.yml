@@ -63,6 +63,23 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked --all-targets --all-features --no-fail-fast
+      - name: Exercise RTMP, RTMPS, SRT and HTTP-FLV with native MediaMTX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = "v1.21.4"
+          $asset = "mediamtx_${release}_windows_amd64.zip"
+          $archive = Join-Path $env:RUNNER_TEMP $asset
+          $fixture = Join-Path $env:RUNNER_TEMP "castvane-mediamtx"
+          Invoke-WebRequest -Uri "https://github.com/bluenviron/mediamtx/releases/download/$release/$asset" -OutFile $archive
+          $digest = "835645b2700ffce4d2b6cb04bfa0aadce95335da6dfc0d7c2114e6da585734f8"
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ne $digest) {
+            throw "MediaMTX fixture checksum mismatch"
+          }
+          Expand-Archive -Path $archive -DestinationPath $fixture
+          $env:PHASE3_MEDIAMTX_BINARY = Join-Path $fixture "mediamtx.exe"
+          cargo test --locked --test media rtmp_srt_encrypted_ingest_playback_disconnect_and_flv -- --ignored --nocapture
+          exit $LASTEXITCODE
       - run: cargo build --locked --release
       - run: python scripts/smoke-test-windows.py target/release/restreamer-core.exe
       - name: Package portable Windows build

@@ -370,18 +370,21 @@ impl Supervisor {
         sample.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let config = &job.config;
 
+        // Tokio closes Child::stdin when wait is polled. Keep the FFmpeg
+        // control pipe alive while waiting for an exit or a stop command.
+        let mut stdin = child.stdin.take();
         let mut cleanup_ticks = 0u32;
         let mut exit = loop {
             tokio::select! {
                 biased;
                 _ = wake(updates, &mut self.shutdown) => {
                     let reason = if *self.shutdown.borrow() { "application shutdown".into() } else { updates.borrow().reason.clone() };
-                    break terminate(state, &mut child, &mut group, if self.gate.is_some() { 1 } else { options.stop_timeout }, reason, true).await;
+                    break terminate(state, &mut child, &mut group, &mut stdin, if self.gate.is_some() { 1 } else { options.stop_timeout }, reason, true).await;
                 }
                 status = child.wait() => break Exit::natural(status),
                 _ = sample.tick() => {
                     if self.gate.as_ref().is_some_and(|gate| !gate.allows(config)) {
-                        break terminate(state, &mut child, &mut group, 1, "cluster ownership lease expired".into(), true).await;
+                        break terminate(state, &mut child, &mut group, &mut stdin, 1, "cluster ownership lease expired".into(), true).await;
                     }
                     cleanup_ticks += 1;
                     if cleanup_ticks >= 30 && let Some(graph) = self.graph.upgrade() {
@@ -400,7 +403,7 @@ impl Supervisor {
                         Some(("sampled resource limit exceeded", false))
                     } else { None };
                     if let Some((reason, normal)) = reason {
-                        let mut exit = terminate(state, &mut child, &mut group, options.stop_timeout, reason.into(), false).await;
+                        let mut exit = terminate(state, &mut child, &mut group, &mut stdin, options.stop_timeout, reason.into(), false).await;
                         if !normal && exit.state == Execution::Finished { exit.state = Execution::Failed; }
                         break exit;
                     }
@@ -513,17 +516,21 @@ async fn terminate(
     state: &Arc<Mutex<Runtime>>,
     child: &mut Child,
     group: &mut Group,
+    stdin: &mut Option<tokio::process::ChildStdin>,
     timeout: u64,
     reason: Arc<str>,
     interrupted: bool,
 ) -> Exit {
     lock(state).execution = Execution::Finishing;
     #[cfg(target_os = "linux")]
-    group.stop();
+    {
+        let _ = stdin;
+        group.stop();
+    }
     #[cfg(windows)]
     {
         use tokio::io::AsyncWriteExt;
-        let requested = if let Some(stdin) = &mut child.stdin {
+        let requested = if let Some(stdin) = stdin.as_mut() {
             matches!(
                 tokio::time::timeout(Duration::from_millis(100), stdin.write_all(b"q\n")).await,
                 Ok(Ok(()))

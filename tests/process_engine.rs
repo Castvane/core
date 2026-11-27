@@ -434,7 +434,9 @@ async fn real_ffmpeg_ffprobe_and_restart_reconciliation() {
     server.order("sample", "restart").await;
     let restarted = server
         .wait_state("sample", |state| {
-            state["exec"] == "running" && state["pid"] != old
+            state["exec"] == "running"
+                && state["pid"] != old
+                && state["progress"]["frame"].as_u64().unwrap_or(0) > 0
         })
         .await;
     let restarted_pid = restarted["pid"].as_i64().unwrap();
@@ -442,7 +444,25 @@ async fn real_ffmpeg_ffprobe_and_restart_reconciliation() {
     server.wait_reports("sample", 1).await;
     server.state.close().await;
     assert!(!running(restarted_pid));
-    assert!(std::fs::metadata(&output).unwrap().len() > 0);
+    assert!(
+        tokio::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "csv=p=0"
+            ])
+            .arg(&output)
+            .output()
+            .await
+            .is_ok_and(|probe| probe.status.success()
+                && String::from_utf8_lossy(&probe.stdout).trim() == "mpeg4"),
+        "the restarted FFmpeg job did not finalize a readable video"
+    );
     drop(server);
 
     let server = Server::open(&dir, &[]).await;

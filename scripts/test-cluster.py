@@ -158,8 +158,8 @@ class Node:
                 self.process.wait()
                 raise
 
-    def request(self, method, path, payload=None, *, auth=True):
-        connection = HTTPConnection("127.0.0.1", self.api, timeout=6)
+    def request(self, method, path, payload=None, *, auth=True, timeout=6):
+        connection = HTTPConnection("127.0.0.1", self.api, timeout=timeout)
         headers = {}
         if auth and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -339,6 +339,38 @@ def exercise(binary, root, upgrade_from=None):
         assert leader_node.call("PUT", "/node/4/fs/disk/remote.json", {"value": 42}, expected=201) == b""
         assert leader_node.call("GET", "/node/4/fs/disk/remote.json") == {"value": 42}
         leader_node.call("DELETE", "/node/4/fs/disk/remote.json")
+
+        operation = {"operation": "copy", "source": "disk:/fixture.txt", "target": "mem:/copied.txt"}
+        assert leader_node.request("PUT", "/api/v3/cluster/node/4/fs", operation, auth=False)[0] in (401, 403)
+        leader_node.call("PUT", "/node/999/fs", operation, expected=404)
+        leader_node.call("PUT", "/node/4/fs", {**operation, "operation": "append"}, expected=400)
+        leader_node.call("PUT", "/node/4/fs", {**operation, "target": "mem:/../invalid"}, expected=400)
+        leader_node.call("PUT", "/node/4/fs", {**operation, "operation": "move", "target": "missing:/copy"}, expected=404)
+        leader_node.call("PUT", "/node/4/fs", {**operation, "target": "mem:/" + "x" * 16384}, expected=413)
+        assert leader_node.call("PUT", "/node/4/fs", operation) is None
+        assert leader_node.call("GET", "/node/4/fs/mem/copied.txt") == b"fixture"
+        assert leader_node.call("GET", "/node/4/fs/disk/fixture.txt") == b"fixture"
+        assert leader_node.call("PUT", "/node/4/fs", {
+            "operation": "move", "source": "mem:/copied.txt", "target": "disk:/moved.txt",
+        }) is None
+        leader_node.call("GET", "/node/4/fs/mem/copied.txt", expected=404)
+        assert leader_node.call("GET", "/node/4/fs/disk/moved.txt") == b"fixture"
+        assert not (leader_node.directory / "media" / "moved.txt").exists()
+        leader_node.call("PUT", "/node/4/fs", {**operation, "source": "disk:/missing.txt"}, expected=404)
+        assert worker.call("PUT", "/node/4/fs", operation, expected=503)["code"] == 503
+        large = bytes(2 * 1024 * 1024)
+        (worker.directory / "media" / "large.bin").write_bytes(large)
+        assert leader_node.call("PUT", "/node/4/fs", {
+            "operation": "copy", "source": "disk:/large.bin", "target": "disk:/large-copy.bin",
+        }) is None
+        assert (worker.directory / "media" / "large-copy.bin").read_bytes() == large
+        status, problem = leader_node.request("PUT", "/api/v3/cluster/node/4/fs", {
+            "operation": "move", "source": "disk:/large.bin", "target": "disk:/timed-out.bin",
+            "bandwidth_limit_kbit": 8,
+        }, timeout=15)
+        assert status == 408 and problem["code"] == 408
+        assert (worker.directory / "media" / "large.bin").read_bytes() == large
+        assert not (worker.directory / "media" / "timed-out.bin").exists()
 
         started = time.monotonic()
         leader_node.call("POST", "/process", {

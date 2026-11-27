@@ -153,6 +153,14 @@ pub trait Storage: Send + Sync {
     async fn read(&self, meta: &Meta, range: Range<u64>) -> Result<Stream, Error>;
     async fn put(&self, key: &Key, stream: Stream) -> Result<bool, Error>;
     async fn delete(&self, key: &Key) -> Result<(), Error>;
+    /// Delete the observed version. Backends without conditional deletion check the tag
+    /// immediately before deleting.
+    async fn delete_unchanged(&self, expected: &Meta) -> Result<(), Error> {
+        if self.stat(&expected.key).await?.tag != expected.tag {
+            return Err(Error::Changed);
+        }
+        self.delete(&expected.key).await
+    }
     async fn list(&self) -> Result<Vec<Meta>, Error>;
     async fn usage(&self) -> Result<Usage, Error>;
 }
@@ -168,4 +176,35 @@ pub fn bounded(stream: Stream, maximum: u64) -> Stream {
             yield chunk;
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn conditional_delete_preserves_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let disk = Disk::open(directory.path().to_path_buf(), None)
+            .await
+            .unwrap();
+        let memory = Memory::new(1024, false);
+        let key = Key::parse("media").unwrap();
+        let payload =
+            |bytes| Box::pin(futures_util::stream::iter([Ok(Bytes::from_static(bytes))])) as Stream;
+        for storage in [&disk as &dyn Storage, &memory] {
+            storage.put(&key, payload(b"initial")).await.unwrap();
+            let original = storage.stat(&key).await.unwrap();
+            storage.put(&key, payload(b"replacement")).await.unwrap();
+
+            assert!(matches!(
+                storage.delete_unchanged(&original).await,
+                Err(Error::Changed)
+            ));
+            let replacement = storage.stat(&key).await.unwrap();
+            assert_eq!(replacement.size, 11);
+            storage.delete_unchanged(&replacement).await.unwrap();
+            assert!(matches!(storage.stat(&key).await, Err(Error::Missing)));
+        }
+    }
 }

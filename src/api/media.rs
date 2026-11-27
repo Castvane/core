@@ -7,14 +7,15 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, put},
 };
-use serde::Deserialize;
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{ApiError, media_http};
 use crate::{
     App,
     media::{
-        Mount,
+        Media, Mount,
         alias::Rule,
         sessions::TokenRequest,
         storage::{Error, Key, Meta, now_secs},
@@ -263,8 +264,8 @@ async fn delete_file(
     Ok(format!("Deleted: {name}").into_response())
 }
 
-#[derive(Deserialize)]
-struct Operation {
+#[derive(Deserialize, Serialize)]
+pub(crate) struct Operation {
     operation: String,
     source: String,
     target: String,
@@ -276,7 +277,11 @@ async fn operation(
     State(app): State<Arc<App>>,
     data: Result<Json<Operation>, axum::extract::rejection::JsonRejection>,
 ) -> JsonResponse {
-    let data = json_body(data)?;
+    execute_operation(&app.media, json_body(data)?).await?;
+    Ok(Json(json!("OK")))
+}
+
+pub(crate) async fn execute_operation(media: &Media, data: Operation) -> Result<(), ApiError> {
     if !matches!(data.operation.as_str(), "copy" | "move") {
         return Err(ApiError::bad_request("invalid operation"));
     }
@@ -284,30 +289,39 @@ async fn operation(
         let (storage, path) = address
             .split_once(':')
             .ok_or(ApiError::bad_request("missing filesystem prefix"))?;
-        Ok((app.media.get(storage)?, Key::parse(path)?))
+        Ok((media.get(storage)?, Key::parse(path)?))
     };
     let (from, source) = resolve(&data.source)?;
     let (to, target) = resolve(&data.target)?;
     if from.name == to.name && source == target {
-        return Ok(Json(json!("OK")));
+        return Ok(());
     }
-    let _slot = app.media.uploads.try_acquire().map_err(|_| Error::Full)?;
+    let _slot = media.uploads.try_acquire().map_err(|_| Error::Full)?;
     let meta = from.backend.stat(&source).await?;
-    let read = from.backend.read(&meta, 0..meta.size).await?;
+    let mut read = from.backend.read(&meta, 0..meta.size).await?;
+    let size = meta.size;
+    let read = Box::pin(async_stream::try_stream! {
+        let mut remaining = size;
+        while let Some(chunk) = read.next().await {
+            let chunk = chunk?;
+            remaining = remaining.checked_sub(chunk.len() as u64).ok_or(Error::Changed)?;
+            yield chunk;
+        }
+        if remaining != 0 {
+            Err(Error::Changed)?;
+        }
+    });
     let stream = media_http::transfer_stream(
         read,
-        app.media.stop.clone(),
+        media.stop.clone(),
         None,
         data.bandwidth_limit_kbit.saturating_mul(125),
     );
     to.backend.put(&target, stream).await?;
     if data.operation == "move" {
-        if from.backend.stat(&source).await?.tag != meta.tag {
-            return Err(Error::Changed.into());
-        }
-        from.backend.delete(&source).await?;
+        from.backend.delete_unchanged(&meta).await?;
     }
-    Ok(Json(json!("OK")))
+    Ok(())
 }
 
 fn transport(app: &App) -> Result<&Transport, ApiError> {

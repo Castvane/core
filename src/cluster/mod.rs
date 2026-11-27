@@ -1,5 +1,5 @@
 pub(crate) mod diagnostics;
-mod files;
+pub(crate) mod files;
 pub mod model;
 mod network;
 mod storage;

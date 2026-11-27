@@ -5,14 +5,14 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     Extension, Json, Router,
     body::{Body, to_bytes},
-    extract::{Path, Request, State},
+    extract::{DefaultBodyLimit, Path, Request, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderName, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, put},
 };
-use serde_json::json;
+use serde_json::{Value, json};
 
-use super::{Cluster, Failure, Raft};
+use super::{Cluster, Failure, Peer, Raft, network::VERSION};
 use crate::{
     api::{ApiError, media, media_http},
     media::{
@@ -22,9 +22,16 @@ use crate::{
 };
 
 type Local = State<(Raft, Arc<Media>)>;
+pub(crate) const OPERATION_BODY_LIMIT: usize = 16 * 1024;
+pub(super) const OPERATION_PATH: &str = "/fs";
+pub(super) const OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn routes(raft: Raft, media: Arc<Media>) -> Router {
     Router::new()
+        .route(
+            OPERATION_PATH,
+            put(operation).layer(DefaultBodyLimit::max(OPERATION_BODY_LIMIT)),
+        )
         .route("/fs/{storage}", get(list))
         .route(
             "/fs/{storage}/{*path}",
@@ -38,6 +45,17 @@ async fn check(raft: &Raft, peer: u64) -> Result<(), ApiError> {
         return Err(ApiError::forbidden("the current leader is required"));
     }
     Ok(())
+}
+
+async fn operation(
+    State((raft, media)): Local,
+    Extension(peer): Extension<u64>,
+    body: Result<Json<media::Operation>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    check(&raft, peer).await?;
+    let Json(body) = body.map_err(|_| ApiError::bad_request("invalid filesystem operation"))?;
+    media::execute_operation(&media, body).await?;
+    Ok(Json(Value::Null))
 }
 
 async fn list(
@@ -109,13 +127,7 @@ async fn delete(
 }
 
 impl Cluster {
-    pub async fn remote_file(
-        &self,
-        id: u64,
-        storage: &str,
-        path: Option<&str>,
-        request: Request,
-    ) -> Result<Response, ApiError> {
+    async fn file_peer(&self, id: u64) -> Result<&Peer, Failure> {
         self.quorum().await?;
         let peer = self.peers.get(&id).ok_or(Failure::Missing)?;
         if !self
@@ -126,8 +138,53 @@ impl Cluster {
             .nodes()
             .any(|(node, _)| *node == id)
         {
-            return Err(Failure::Missing.into());
+            return Err(Failure::Missing);
         }
+        Ok(peer)
+    }
+
+    pub(crate) async fn remote_file_operation(
+        &self,
+        id: u64,
+        operation: media::Operation,
+    ) -> Result<Response, ApiError> {
+        let peer = self.file_peer(id).await?;
+        let upstream = self
+            .network
+            .client
+            .put(format!("{}{VERSION}{OPERATION_PATH}", peer.address))
+            .header("x-castvane-cluster", self.name.as_str())
+            .timeout(OPERATION_TIMEOUT + Duration::from_secs(1))
+            .json(&operation)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    ApiError::Http(
+                        StatusCode::REQUEST_TIMEOUT,
+                        "filesystem operation timed out",
+                    )
+                } else {
+                    Failure::Unavailable.into()
+                }
+            })?;
+        if upstream.status() == StatusCode::REQUEST_TIMEOUT {
+            return Err(ApiError::Http(
+                StatusCode::REQUEST_TIMEOUT,
+                "filesystem operation timed out",
+            ));
+        }
+        Ok(file_response(upstream))
+    }
+
+    pub async fn remote_file(
+        &self,
+        id: u64,
+        storage: &str,
+        path: Option<&str>,
+        request: Request,
+    ) -> Result<Response, ApiError> {
+        let peer = self.file_peer(id).await?;
         let mut target = url::Url::parse(&peer.address).map_err(|_| Failure::Invalid)?;
         {
             let mut parts = target.path_segments_mut().map_err(|_| Failure::Invalid)?;
@@ -168,25 +225,29 @@ impl Cluster {
             outbound = outbound.body(bytes);
         }
         let upstream = outbound.send().await.map_err(|_| Failure::Unavailable)?;
-        let status = upstream.status();
-        let mut headers = HeaderMap::new();
-        for name in [
-            header::CONTENT_TYPE,
-            header::CONTENT_LENGTH,
-            header::CONTENT_RANGE,
-            header::ACCEPT_RANGES,
-            header::ETAG,
-            header::LAST_MODIFIED,
-            header::CONTENT_DISPOSITION,
-        ] {
-            copy_header(upstream.headers(), &mut headers, name);
-        }
-        headers.insert(
-            header::CACHE_CONTROL,
-            header::HeaderValue::from_static("private, no-store"),
-        );
-        Ok((status, headers, Body::from_stream(upstream.bytes_stream())).into_response())
+        Ok(file_response(upstream))
     }
+}
+
+fn file_response(upstream: reqwest::Response) -> Response {
+    let status = upstream.status();
+    let mut headers = HeaderMap::new();
+    for name in [
+        header::CONTENT_TYPE,
+        header::CONTENT_LENGTH,
+        header::CONTENT_RANGE,
+        header::ACCEPT_RANGES,
+        header::ETAG,
+        header::LAST_MODIFIED,
+        header::CONTENT_DISPOSITION,
+    ] {
+        copy_header(upstream.headers(), &mut headers, name);
+    }
+    headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("private, no-store"),
+    );
+    (status, headers, Body::from_stream(upstream.bytes_stream())).into_response()
 }
 
 fn copy_header(source: &HeaderMap, target: &mut HeaderMap, name: HeaderName) {

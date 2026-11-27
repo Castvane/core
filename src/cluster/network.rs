@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, io::Cursor, sync::Arc, time::Duration};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Extension, State},
-    http::StatusCode,
+    http::{Method, StatusCode},
     routing::post,
 };
 use hyper_util::rt::TokioIo;
@@ -42,7 +42,7 @@ use super::{Peer, Raft, Types, model::MAX_STATE};
 use crate::StartupError;
 
 const MAX_MESSAGE: usize = 1_048_576;
-const VERSION: &str = "/internal/cluster/v1";
+pub(super) const VERSION: &str = "/internal/cluster/v1";
 
 #[derive(Clone)]
 pub struct Network {
@@ -348,9 +348,15 @@ pub async fn serve(
                                 StatusCode::FORBIDDEN,
                             ));
                         }
-                        match tokio::time::timeout(Duration::from_secs(4), routes.oneshot(request))
-                            .await
+                        let timeout = if request.method() == Method::PUT
+                            && request.uri().path().strip_prefix(VERSION)
+                                == Some(super::files::OPERATION_PATH)
                         {
+                            super::files::OPERATION_TIMEOUT
+                        } else {
+                            Duration::from_secs(4)
+                        };
+                        match tokio::time::timeout(timeout, routes.oneshot(request)).await {
                             Ok(result) => result,
                             Err(_) => Ok(axum::response::IntoResponse::into_response(
                                 StatusCode::REQUEST_TIMEOUT,

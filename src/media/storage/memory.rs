@@ -172,6 +172,16 @@ impl Storage for Memory {
             .ok_or(Error::Missing)
     }
 
+    async fn delete_unchanged(&self, expected: &Meta) -> Result<(), Error> {
+        let mut entries = self.entries.lock().await;
+        let entry = entries.get(&expected.key).ok_or(Error::Missing)?;
+        if entry.meta.tag != expected.tag {
+            return Err(Error::Changed);
+        }
+        entries.remove(&expected.key);
+        Ok(())
+    }
+
     async fn list(&self) -> Result<Vec<Meta>, Error> {
         Ok(self
             .entries

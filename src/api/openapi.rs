@@ -590,6 +590,7 @@ fn cluster_paths(spec: &mut Value) {
         ("/node/{id}/process", &["get"][..]),
         ("/fs/{storage}", &["get"][..]),
         ("/node/{id}/state", &["get", "put"][..]),
+        ("/node/{id}/fs", &["put"][..]),
         ("/node/{id}/fs/{storage}", &["get"][..]),
         (
             "/node/{id}/fs/{storage}/{path}",
@@ -720,6 +721,21 @@ fn cluster_paths(spec: &mut Value) {
         "content":schema_content("Processes")
     });
     processes["responses"]["507"] = error();
+
+    let operation = &mut spec["paths"]["/api/v3/cluster/node/{id}/fs"]["put"];
+    operation["description"] = json!(
+        "Copy or move between mounted filesystems on one member. Requires an administrator on the current leader with quorum and a writable API."
+    );
+    operation["parameters"][0]["schema"] = json!({"type":"integer","minimum":1});
+    operation["requestBody"] =
+        json!({"required":true,"content":schema_content("StorageOperation")});
+    operation["responses"]["200"] = json!({
+        "description":"Operation completed",
+        "content":{"application/json":{"schema":{"type":"null"}}}
+    });
+    for status in ["405", "408", "413", "507"] {
+        operation["responses"][status] = error();
+    }
 
     let files = &mut spec["paths"]["/api/v3/cluster/fs/{storage}"]["get"];
     files["description"] = json!(

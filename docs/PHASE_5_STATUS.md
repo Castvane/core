@@ -29,7 +29,7 @@ Cluster paths are under /api/v3/cluster. Administrator authorization and the exi
 | Topology | GET root, health, snapshot indices, deployments, node list, node detail, live node build metadata, node process list and node state |
 | Membership | POST preprovisioned node enrollment, PUT replacement voter set, targeted leadership transfer, node drain and disable, and removal of drained voters and learners |
 | Process | GET, POST, PUT and DELETE definitions; configuration, sampled state, reports, probe, playback origin and metadata; command and relocation PUT |
-| Filesystem | Member file inventory, aggregate storage listing, node mount listing, ranged GET, HEAD, PUT up to 1 MiB, and DELETE |
+| Filesystem | Member file inventory, aggregate storage listing, node mount listing, ranged GET, HEAD, PUT up to 1 MiB, DELETE, and per-node copy and move |
 | IAM | List, create, update and delete managed identities; list and replace policies |
 | Zones and aliases | Zone CRUD and ordered alias/rule operations |
 | Coordination | Committed KV with conditional revisions, lease locking, renewal and owner-checked unlock |
@@ -51,7 +51,7 @@ Manual UI acceptance remains open. Test each pinned UI against a disposable clus
 - Automatic leave forwarding and leadership handoff for a self-removing leader, time-limited enrollment and live identity rotation.
 - Memory and GPU pressure rebalancing, pipeline affinity and failure-domain separation, relocation cancellation and dry-run analysis, and per-device encoder and decoder session limits.
 - Distributed certificate issuance and renewal leadership. Cluster mode uses externally coordinated public TLS certificates and declines built-in automatic ACME.
-- Legacy playback redirects, cross-node process references, automatic zone routing and remote copy/move.
+- Legacy playback redirects, cross-node process references and automatic zone routing.
 - Full Go cluster API parity, including original snapshot downloads and shapes, distributed event subscriptions, and additional legacy node and database routes. The Go /v1/* wire protocol and mixed Go/Rust Raft membership are outside scope.
 - Hardened backup and disaster recovery, upgrade compatibility, additional packet loss and latency tests, larger topology and hardware validation, and checked Docker Compose deployment examples.
 

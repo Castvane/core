@@ -19,7 +19,7 @@ use super::{Error, Key, MAX_LIST, MAX_UPLOAD, Meta, Storage, Stream, Usage, boun
 pub struct Disk {
     root: Arc<Dir>,
     limit: Option<u64>,
-    publish: tokio::sync::Mutex<()>,
+    publish: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Disk {
@@ -29,8 +29,25 @@ impl Disk {
         Ok(Self {
             root: Arc::new(root),
             limit,
-            publish: tokio::sync::Mutex::new(()),
+            publish: Arc::new(tokio::sync::Mutex::new(())),
         })
+    }
+
+    async fn remove(&self, key: &Key, tag: Option<String>) -> Result<(), Error> {
+        let guard = self.publish.clone().lock_owned().await;
+        let root = self.root.clone();
+        let key = key.clone();
+        io(move || {
+            let _guard = guard;
+            if let Some(tag) = tag
+                && meta(&key, &root.metadata(key.as_str())?)?.tag != tag
+            {
+                return Err(Error::Changed);
+            }
+            root.remove_file(key.as_str())?;
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -141,7 +158,7 @@ impl Storage for Disk {
         }
         file.sync_all().await?;
         drop(file);
-        let _guard = self.publish.lock().await;
+        let guard = self.publish.clone().lock_owned().await;
         let prior = match self.stat(&temp.key).await {
             Ok(meta) => Some(meta.size),
             Err(Error::Missing) => None,
@@ -158,6 +175,7 @@ impl Storage for Disk {
             }
         }
         io(move || {
+            let _guard = guard;
             temp.root
                 .rename(&temp.path, &temp.root, temp.key.as_str())?;
             Ok(prior.is_none())
@@ -166,14 +184,11 @@ impl Storage for Disk {
     }
 
     async fn delete(&self, key: &Key) -> Result<(), Error> {
-        let _guard = self.publish.lock().await;
-        let root = self.root.clone();
-        let key = key.clone();
-        io(move || {
-            root.remove_file(key.as_str())?;
-            Ok(())
-        })
-        .await
+        self.remove(key, None).await
+    }
+
+    async fn delete_unchanged(&self, expected: &Meta) -> Result<(), Error> {
+        self.remove(&expected.key, Some(expected.tag.clone())).await
     }
 
     async fn list(&self) -> Result<Vec<Meta>, Error> {

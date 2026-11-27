@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router,
     body::Bytes,
     extract::{
-        Path, Query, State,
+        DefaultBodyLimit, Path, Query, State,
         rejection::{BytesRejection, JsonRejection},
     },
     http::{StatusCode, Uri},
@@ -16,7 +16,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::ApiError;
+use super::{ApiError, media};
 use crate::{
     App,
     auth::Identity,
@@ -44,6 +44,12 @@ pub fn routes() -> Router<Arc<App>> {
             .route("/node/{id}/files", get(node_media))
             .route("/node/{id}/process", get(node_processes))
             .route("/fs/{storage}", get(cluster_files))
+            .route(
+                "/node/{id}/fs",
+                put(node_file_operation).layer(DefaultBodyLimit::max(
+                    crate::cluster::files::OPERATION_BODY_LIMIT,
+                )),
+            )
             .route("/node/{id}/fs/{storage}", get(node_files))
             .route(
                 "/node/{id}/fs/{storage}/{*path}",
@@ -1118,6 +1124,25 @@ async fn node_files(
     authorized(&app, &actor)?
         .remote_file(id, &storage, None, request)
         .await
+}
+
+async fn node_file_operation(
+    State(app): StateArg,
+    Extension(actor): Actor,
+    Path(id): Path<String>,
+    data: Result<Json<media::Operation>, JsonRejection>,
+) -> Result<axum::response::Response, ApiError> {
+    let cluster = authorized(&app, &actor)?;
+    let id = id.parse().map_err(|_| Failure::Invalid)?;
+    let Json(operation) = data.map_err(|rejection| {
+        let status = if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            StatusCode::PAYLOAD_TOO_LARGE
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        ApiError::Http(status, "invalid filesystem operation")
+    })?;
+    cluster.remote_file_operation(id, operation).await
 }
 
 async fn node_file(

@@ -49,6 +49,8 @@ Read the selected member's file inventory at `/api/v3/cluster/node/{id}/files` a
 
 To remove a member, set `draining: true` on its node state route and wait until assignments clear. Transfer leadership first if the node is the leader. Send `PUT /api/v3/cluster/leave` with `{"id":"4"}` to the current leader and verify that the member disappears from `GET /api/v3/cluster/node`. The drained state survives re-enrollment so an administrator can validate the returning node before approving new assignments. Membership removal leaves static peer certificates and provisioning intact. Remove the retired peer from the provisioned trust configuration as part of decommissioning.
 
+Use `PUT /api/v3/cluster/node/{id}/fs` to copy or move between mounts on that member. For example, send `{"operation":"copy","source":"disk:/video.ts","target":"mem:/video.ts"}` to the leader. The worker streams the data between its storage backends and applies the optional `bandwidth_limit_kbit` and the 10-second RPC deadline. A move writes the target, then checks the source version before deleting it. Core serializes that check and deletion with its disk and memory writes. External disk writers and S3 operations can still race source deletion. A conflict or timeout can leave both paths present. Inspect both paths before retrying.
+
 ## Availability and recovery
 
 Writes require Raft quorum. After a write timeout, read the committed revision before retrying. KV supports expected revisions. Process updates reject conflicting revisions.

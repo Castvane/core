@@ -1,5 +1,7 @@
 # Running Castvane natively on Windows
 
+Native Windows AMD64 builds are intended for development. Use Linux or a Linux container for production.
+
 Use 64-bit Windows, the Microsoft Visual C++ x64 Redistributable, and a native x64 FFmpeg and FFprobe pair. These executables are supplied by the operator. Windows CI builds with the MSVC Rust toolchain and provides a portable `restreamer-core.exe` archive with a SHA-256 checksum. The candidate workflow packages Windows alongside both Linux targets with a CycloneDX SBOM, license inventory and GitHub artifact attestations. See the [release guide](RELEASING.md).
 
 To build from source, install Rust through rustup and Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK. Open a developer PowerShell and run `cargo build --locked --release`. Use `target\release\restreamer-core.exe` or extract the CI archive.
@@ -24,4 +26,4 @@ Castvane uses Windows Job Objects for child cleanup. A normal FFmpeg stop reques
 
 ### SRT interoperability
 
-Windows CI requires publishing, playback and publisher disconnection for RTMP, RTMPS and clear SRT. It also checks HTTP-FLV. A separate diagnostic exercises encrypted SRT and reports failures in the workflow summary. Encrypted SRT playback with MediaMTX v1.21.4 produced packet decryption failures with Gyan FFmpeg 9.1 and the BtbN FFmpeg 9.0.2 build dated 2026-11-26. A standalone MediaMTX instance on Linux reproduced the BtbN failure on the same generated stream that distribution FFmpeg 7.1.5 decoded successfully. The Linux distribution FFmpeg and MediaMTX fixtures still exercise encrypted playback as a required check. The server continues to require its configured passphrase when SRT encryption is enabled. [Windows test evidence](https://github.com/Castvane/core/actions/runs/45965677713) · [Media configuration](PHASE_3_STATUS.md)
+**Encrypted SRT playback is unsupported on native Windows.** It is outside the Windows release acceptance criteria. Windows CI continues to check publishing, playback and publisher disconnection for RTMP, RTMPS and clear SRT, plus HTTP-FLV. Encrypted SRT playback with MediaMTX v1.21.4 produced packet decryption failures with Gyan FFmpeg 9.1 and the BtbN FFmpeg 9.0.2 build dated 2026-11-26. A standalone MediaMTX instance on Linux reproduced the BtbN failure on the same generated stream that distribution FFmpeg 7.1.5 decoded successfully. The Linux distribution FFmpeg and MediaMTX fixtures still exercise encrypted playback as a required check. The server continues to require its configured passphrase when SRT encryption is enabled. [Windows test evidence](https://github.com/Castvane/core/actions/runs/45965677713) · [Media configuration](PHASE_3_STATUS.md)

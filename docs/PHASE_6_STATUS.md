@@ -85,6 +85,6 @@ Developer and operator commands are in the [deployment guide](DEPLOYMENT.md). Do
 - [x] Exercise pinned UI discovery/login/refresh with existing bundles and retain exact blockers.
 - [ ] Complete remaining route and schema checks and verify the API and capability contracts for first-party UI integration.
 - [ ] Complete Phase 5 membership administration, distributed certificate management and cross-node workflow parity.
-- [ ] Close the roadmap gaps for Auth0 federation, extended FFmpeg live playout and telemetry, and encrypted SRT interoperability for the supported media combinations.
+- [ ] Close the roadmap gaps for Auth0 federation, extended FFmpeg live playout and telemetry, and encrypted SRT interoperability with the supported Linux production FFmpeg build. Native Windows encrypted SRT playback is unsupported and outside release acceptance.
 - [ ] Validate the 24-hour and 72-hour workloads, real-provider S3, physical GPU and multi-host deployment on representative infrastructure.
 - [ ] Configure protected registry promotion and obtain explicit approval for a first stable release.

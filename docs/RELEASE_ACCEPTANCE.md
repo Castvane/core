@@ -1,6 +1,6 @@
 # Owner release acceptance
 
-Current status for every row is **pending**. The Castvane UI row applies when the first-party UI is shipped or advertised. The backend acceptance rows apply to the first stable Core release. Use the exact candidate commit and record dates, environment, commands, failure diagnostics and final pass/fail in the release notes. Redact secrets and private media URLs.
+Current status for every row is **pending**. The Castvane UI row applies when the first-party UI is shipped or advertised. The backend acceptance rows apply to the first stable Core release on Linux, including Linux containers. Native Windows AMD64 is a development target. Encrypted SRT playback is unsupported there and outside release acceptance. Use the exact candidate commit and record dates, environment, commands, failure diagnostics and final pass/fail in the release notes. Redact secrets and private media URLs.
 
 | Gate | Prerequisites and procedure | Pass criteria and diagnostics |
 | --- | --- | --- |

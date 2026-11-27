@@ -81,16 +81,6 @@ jobs:
           Add-Content $env:GITHUB_ENV "PHASE3_MEDIAMTX_BINARY=$binary"
       - name: Exercise RTMP, RTMPS, HTTP-FLV and clear SRT on Windows
         run: cargo test --locked --test media rtmp_rtmps_srt_ingest_playback_disconnect_and_flv -- --ignored --nocapture
-      - name: Track encrypted SRT compatibility with the Windows FFmpeg build
-        id: encrypted-srt
-        continue-on-error: true
-        run: cargo test --locked --test media encrypted_srt_ingest_playback_disconnect -- --ignored --nocapture
-      - name: Report an encrypted SRT interoperability failure
-        if: steps.encrypted-srt.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Write-Output '::warning::Encrypted SRT playback failed. See docs/WINDOWS.md for the tracked compatibility limitation.'
-          Add-Content $env:GITHUB_STEP_SUMMARY 'Encrypted SRT playback remains a known compatibility gap for the Windows FFmpeg and MediaMTX pairing. The encrypted fixture ran and failed.'
       - run: cargo build --locked --release
       - run: python scripts/smoke-test-windows.py target/release/restreamer-core.exe
       - name: Package portable Windows build
